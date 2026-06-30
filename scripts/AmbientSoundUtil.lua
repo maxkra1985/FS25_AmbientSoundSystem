@@ -1,915 +1,247 @@
--- ЧАСТЬ 1
 ------------------------------------------------------------------------------
--- AmbientSoundUtil.lua
---
--- Вспомогательные функции системы Ambient Sound.
---
--- Данный модуль не содержит логики воспроизведения звуков.
--- Здесь располагаются только универсальные функции, используемые
--- всеми остальными компонентами системы.
---
--- Автор: Ambient Sound System
+-- Создание Sample
 ------------------------------------------------------------------------------
-
-AmbientSoundUtil = {}
-
-------------------------------------------------------------------------------
--- Константы
-------------------------------------------------------------------------------
-
-AmbientSoundUtil.LOG_PREFIX = "[AmbientSound]"
-
-AmbientSoundUtil.LOG_LEVEL_DEBUG   = 0
-AmbientSoundUtil.LOG_LEVEL_INFO    = 1
-AmbientSoundUtil.LOG_LEVEL_WARNING = 2
-AmbientSoundUtil.LOG_LEVEL_ERROR   = 3
-
-------------------------------------------------------------------------------
--- Локальные переменные
-------------------------------------------------------------------------------
-
-local debugEnabled = false
-
-------------------------------------------------------------------------------
--- Включение / отключение режима отладки
-------------------------------------------------------------------------------
-
---- Включает или отключает вывод отладочной информации.
----@param state boolean
-function AmbientSoundUtil.setDebugEnabled(state)
-	debugEnabled = state == true
-end
-
-------------------------------------------------------------------------------
---- Возвращает состояние режима отладки.
----@return boolean
-------------------------------------------------------------------------------
-function AmbientSoundUtil.isDebugEnabled()
-	return debugEnabled
-end
-
-------------------------------------------------------------------------------
--- Внутреннее логирование
-------------------------------------------------------------------------------
-
-local function writeLog(prefix, formatString, ...)
-
-	local text
-
-	if select("#", ...) > 0 then
-		text = string.format(formatString, ...)
-	else
-		text = tostring(formatString)
+function AmbientSoundUtil.createSample(config)
+	if config == nil then
+		return nil
+	end
+	if config.soundFiles == nil then
+		return nil
+	end
+	if #config.soundFiles == 0 then
+		return nil
 	end
 
-	Logging.info("%s %s%s",
-		AmbientSoundUtil.LOG_PREFIX,
-		prefix,
-		text
-	)
-
-end
-
-------------------------------------------------------------------------------
--- DEBUG
-------------------------------------------------------------------------------
-
---- Выводит отладочное сообщение.
-function AmbientSoundUtil.debug(formatString, ...)
-
-	if not debugEnabled then
-		return
+	-- Случайный файл
+	local filename = config.soundFiles[math.random(#config.soundFiles)]
+	if filename == nil then
+		return nil
 	end
 
-	writeLog("[DEBUG] ", formatString, ...)
+	-- Создание Sample
+	local sample = createSample("AmbientSound")
+	if sample == nil then
+		AmbientSoundUtil.warning("Не удалось создать Sample.")
+		return nil
+	end
 
+	loadSample(sample, filename, false)
+	setSampleVolume(sample, config.volume)
+	setSampleInnerRange(sample, config.innerRange)
+	setSampleOuterRange(sample, config.range)
+	return sample
 end
 
 ------------------------------------------------------------------------------
--- INFO
+-- Получение позиции игрока
 ------------------------------------------------------------------------------
 
---- Выводит информационное сообщение.
-function AmbientSoundUtil.info(formatString, ...)
-
-	writeLog("", formatString, ...)
-
+function AmbientSoundUtil.getPlayerWorldPosition(player)
+	if player == nil then
+		return 0, 0, 0
+	end
+	local node = nil
+	if player.rootNode ~= nil then
+		node = player.rootNode
+	elseif player.getRootNode ~= nil then
+		node = player:getRootNode()
+	end
+	if node == nil then
+		return 0, 0, 0
+	end
+	return getWorldTranslation(node)
 end
 
 ------------------------------------------------------------------------------
--- WARNING
+-- Проверка условий воспроизведения
 ------------------------------------------------------------------------------
-
---- Выводит предупреждение.
-function AmbientSoundUtil.warning(formatString, ...)
-
-	Logging.warning("%s [WARNING] %s",
-		AmbientSoundUtil.LOG_PREFIX,
-		string.format(formatString, ...)
-	)
-
+function AmbientSoundUtil.checkConditions(config)
+	if not AmbientSoundUtil.checkHour(config) then
+		return false
+	end
+	if not AmbientSoundUtil.checkSeason(config) then
+		return false
+	end
+	if not AmbientSoundUtil.checkWeather(config) then
+		return false
+	end
+	return true
 end
 
 ------------------------------------------------------------------------------
--- ERROR
+-- Проверка времени суток
 ------------------------------------------------------------------------------
-
---- Выводит сообщение об ошибке.
-function AmbientSoundUtil.error(formatString, ...)
-
-	Logging.error("%s [ERROR] %s",
-		AmbientSoundUtil.LOG_PREFIX,
-		string.format(formatString, ...)
-	)
-
-end
-
-------------------------------------------------------------------------------
--- Режим игры
-------------------------------------------------------------------------------
-
---- Возвращает true, если код выполняется на сервере.
----@return boolean
-function AmbientSoundUtil.isServer()
-	return g_server ~= nil
-end
-
-------------------------------------------------------------------------------
---- Возвращает true, если код выполняется на клиенте.
----@return boolean
-function AmbientSoundUtil.isClient()
-	return g_client ~= nil
-end
-
-------------------------------------------------------------------------------
---- Возвращает true для выделенного сервера.
----@return boolean
-function AmbientSoundUtil.isDedicatedServer()
-
-	if g_dedicatedServer ~= nil then
+function AmbientSoundUtil.checkHour(config)
+	if g_currentMission == nil then
 		return true
 	end
-
-	return false
-
-end
-
-------------------------------------------------------------------------------
---- Возвращает true для одиночной игры.
----@return boolean
-function AmbientSoundUtil.isSinglePlayer()
-
-	return AmbientSoundUtil.isServer()
-		and AmbientSoundUtil.isClient()
-
-end
-
-------------------------------------------------------------------------------
--- Работа со временем
-------------------------------------------------------------------------------
-
---- Нормализует часы в диапазон 0..23.
----@param hour number
----@return number
-function AmbientSoundUtil.wrapHour(hour)
-
-	while hour < 0 do
-		hour = hour + 24
-	end
-
-	while hour >= 24 do
-		hour = hour - 24
-	end
-
-	return hour
-
-end
-
-------------------------------------------------------------------------------
---- Проверяет попадание часа в диапазон.
---
--- Поддерживает интервалы через полночь.
---
--- Пример:
---
--- 23 -> 7
---
----@param hour number
----@param startHour number
----@param endHour number
----@return boolean
-------------------------------------------------------------------------------
-function AmbientSoundUtil.isHourInRange(hour, startHour, endHour)
-
-	hour = AmbientSoundUtil.wrapHour(hour)
-
-	if startHour == endHour then
+	local environment = g_currentMission.environment
+	if environment == nil then
 		return true
 	end
-
-	if startHour < endHour then
+	local hour = environment.currentHour
+	if hour == nil then
+		return true
+	end
+	local startHour = config.startHour or 0
+	local endHour = config.endHour or 24
+	if startHour <= endHour then
 		return hour >= startHour and hour < endHour
 	end
-
-	return hour >= startHour
-		or hour < endHour
+	return hour >= startHour or hour < endHour
 
 end
 
 ------------------------------------------------------------------------------
---- Преобразует секунды в строку HH:MM:SS.
----@param seconds number
----@return string
+-- Проверка сезона
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.secondsToText(seconds)
-
-	seconds = math.floor(seconds)
-
-	local hours = math.floor(seconds / 3600)
-	local minutes = math.floor((seconds % 3600) / 60)
-	local secs = seconds % 60
-
-	return string.format("%02d:%02d:%02d",
-		hours,
-		minutes,
-		secs
-	)
-end
-
--- ЧАСТЬ 2
-------------------------------------------------------------------------------
--- Локальные ссылки Lua функций
-------------------------------------------------------------------------------
-
-local floor = math.floor
-local random = math.random
-local sqrt = math.sqrt
-
-local format = string.format
-local upper = string.upper
-local lower = string.lower
-local sub = string.sub
-local find = string.find
-local gsub = string.gsub
-
-local insert = table.insert
-
-------------------------------------------------------------------------------
--- Единая система логирования
-------------------------------------------------------------------------------
-
---- Внутренняя функция логирования.
----@param level string
----@param text string
----@param ... any
-local function log(level, text, ...)
-
-	if level == AmbientSoundUtil.LOG_LEVEL_DEBUG
-		and not debugEnabled then
-
-		return
+function AmbientSoundUtil.checkSeason(config)
+	if config.seasons == nil then
+		return true
 	end
-
-
-	local message
-
-	if select("#", ...) > 0 then
-		message = format(text, ...)
-	else
-		message = tostring(text)
+	if #config.seasons == 0 then
+		return true
 	end
-
-
-	local finalMessage = format(
-		"%s [%s] %s",
-		AmbientSoundUtil.LOG_PREFIX,
-		level,
-		message
-	)
-
-
-	if level == AmbientSoundUtil.LOG_LEVEL_ERROR then
-
-		Logging.error(finalMessage)
-
-	elseif level == AmbientSoundUtil.LOG_LEVEL_WARNING then
-
-		Logging.warning(finalMessage)
-
-	else
-
-		Logging.info(finalMessage)
-
+	local season = AmbientSoundUtil.getCurrentSeason()
+	if season == nil then
+		return true
 	end
-
-end
-
-
-------------------------------------------------------------------------------
--- Публичные методы логирования
-------------------------------------------------------------------------------
-
-function AmbientSoundUtil.debug(text, ...)
-
-	log(
-		AmbientSoundUtil.LOG_LEVEL_DEBUG,
-		text,
-		...
-	)
-
-end
-
-
-function AmbientSoundUtil.info(text, ...)
-
-	log(
-		AmbientSoundUtil.LOG_LEVEL_INFO,
-		text,
-		...
-	)
-
-end
-
-
-function AmbientSoundUtil.warning(text, ...)
-
-	log(
-		AmbientSoundUtil.LOG_LEVEL_WARNING,
-		text,
-		...
-	)
-
-end
-
-
-function AmbientSoundUtil.error(text, ...)
-
-	log(
-		AmbientSoundUtil.LOG_LEVEL_ERROR,
-		text,
-		...
-	)
-
-end
-
-
-------------------------------------------------------------------------------
--- Работа со строками
-------------------------------------------------------------------------------
-
---- Удаляет пробелы в начале и конце строки.
----@param value string
----@return string
-function AmbientSoundUtil.trim(value)
-
-	if value == nil then
-		return ""
-	end
-
-
-	return gsub(value, "^%s*(.-)%s*$", "%1")
-
-end
-
-
-------------------------------------------------------------------------------
---- Разделяет строку по разделителю.
----@param value string
----@param separator string
----@return table
-function AmbientSoundUtil.split(value, separator)
-
-	local result = {}
-
-	if value == nil or value == "" then
-		return result
-	end
-
-
-	separator = separator or ","
-
-
-	for item in string.gmatch(
-		value,
-		"([^" .. separator .. "]+)"
-	) do
-
-		insert(
-			result,
-			AmbientSoundUtil.trim(item)
-		)
-
-	end
-
-
-	return result
-
-end
-
-
-------------------------------------------------------------------------------
---- Переводит строку в верхний регистр.
----@param value string
----@return string
-function AmbientSoundUtil.toUpper(value)
-
-	if value == nil then
-		return ""
-	end
-
-
-	return upper(value)
-
-end
-
-
-------------------------------------------------------------------------------
---- Переводит строку в нижний регистр.
----@param value string
----@return string
-function AmbientSoundUtil.toLower(value)
-
-	if value == nil then
-		return ""
-	end
-
-
-	return lower(value)
-
-end
-
-
-------------------------------------------------------------------------------
---- Проверяет начало строки.
----@param value string
----@param search string
----@return boolean
-function AmbientSoundUtil.startsWith(value, search)
-
-	if value == nil or search == nil then
-		return false
-	end
-
-
-	return sub(
-		value,
-		1,
-		string.len(search)
-	) == search
-
-end
-
-
-------------------------------------------------------------------------------
---- Проверяет конец строки.
----@param value string
----@param search string
----@return boolean
-function AmbientSoundUtil.endsWith(value, search)
-
-	if value == nil or search == nil then
-		return false
-	end
-
-
-	return sub(
-		value,
-		-string.len(search)
-	) == search
-
-end
-
-
-------------------------------------------------------------------------------
--- Случайные значения
-------------------------------------------------------------------------------
-
---- Возвращает случайное целое число.
----@param min number
----@param max number
----@return number
-function AmbientSoundUtil.randomInt(min, max)
-
-	return random(
-		floor(min),
-		floor(max)
-	)
-
-end
-
-
-------------------------------------------------------------------------------
---- Возвращает случайное дробное число.
----@param min number
----@param max number
----@return number
-function AmbientSoundUtil.randomFloat(min, max)
-
-	return min + random() * (max - min)
-
-end
-
-
-------------------------------------------------------------------------------
---- Возвращает случайный элемент таблицы.
----@param values table
----@return any
-function AmbientSoundUtil.randomElement(values)
-
-	if values == nil or #values == 0 then
-		return nil
-	end
-
-
-	return values[
-		random(1, #values)
-	]
-
-end
-
-
-------------------------------------------------------------------------------
--- Работа с таблицами
-------------------------------------------------------------------------------
-
---- Возвращает количество элементов таблицы.
----@param value table
----@return number
-function AmbientSoundUtil.tableSize(value)
-
-	local count = 0
-
-
-	if value == nil then
-		return 0
-	end
-
-
-	for _ in pairs(value) do
-
-		count = count + 1
-
-	end
-
-
-	return count
-
-end
-
-
-------------------------------------------------------------------------------
---- Создает поверхностную копию таблицы.
----@param source table
----@return table
-function AmbientSoundUtil.shallowCopy(source)
-
-	local result = {}
-
-
-	if source == nil then
-		return result
-	end
-
-
-	for key, value in pairs(source) do
-
-		result[key] = value
-
-	end
-
-
-	return result
-
-end
-
-
-------------------------------------------------------------------------------
---- Очищает таблицу.
----@param value table
-function AmbientSoundUtil.clearTable(value)
-
-	if value == nil then
-		return
-	end
-
-
-	for key in pairs(value) do
-
-		value[key] = nil
-
-	end
-
-end
-
-
--- ЧАСТЬ 3
-------------------------------------------------------------------------------
--- Работа с координатами
-------------------------------------------------------------------------------
-
---- Разбирает строку координат X Y Z.
---
--- Пример:
---
--- "100 50 -200"
---
--- возвращает:
---
--- { x = 100, y = 50, z = -200 }
---
----@param value string
----@return table|nil
-------------------------------------------------------------------------------
-function AmbientSoundUtil.parseTranslation(value)
-
-	if value == nil then
-		return nil
-	end
-
-
-	local values = AmbientSoundUtil.split(
-		value,
-		" "
-	)
-
-
-	if #values < 3 then
-
-		AmbientSoundUtil.warning(
-			"Неверный формат координат: %s",
-			tostring(value)
-		)
-
-		return nil
-
-	end
-
-
-	return {
-
-		x = tonumber(values[1]) or 0,
-
-		y = tonumber(values[2]) or 0,
-
-		z = tonumber(values[3]) or 0
-
-	}
-
-end
-
-
-------------------------------------------------------------------------------
---- Создает случайную точку вокруг позиции.
---
--- Используется для:
---  • случайного смещения статических звуков;
---  • появления источников вокруг игрока.
---
----@param x number
----@param y number
----@param z number
----@param radius number
----@return table
-------------------------------------------------------------------------------
-function AmbientSoundUtil.randomPointInRadius(
-	x,
-	y,
-	z,
-	radius
-)
-
-	local angle = AmbientSoundUtil.randomFloat(
-		0,
-		math.pi * 2
-	)
-
-
-	local distance = AmbientSoundUtil.randomFloat(
-		0,
-		radius
-	)
-
-
-	return {
-
-		x = x + math.cos(angle) * distance,
-
-		y = y,
-
-		z = z + math.sin(angle) * distance
-
-	}
-
-end
-
-
-------------------------------------------------------------------------------
--- Расстояние между точками
-------------------------------------------------------------------------------
-
---- Возвращает двумерное расстояние.
----@param a table
----@param b table
----@return number
-------------------------------------------------------------------------------
-function AmbientSoundUtil.distance2D(a, b)
-
-	if a == nil or b == nil then
-		return 0
-	end
-
-
-	local dx = a.x - b.x
-
-	local dz = a.z - b.z
-
-
-	return sqrt(
-		dx * dx +
-		dz * dz
-	)
-
-end
-
-
-------------------------------------------------------------------------------
---- Возвращает трехмерное расстояние.
----@param a table
----@param b table
----@return number
-------------------------------------------------------------------------------
-function AmbientSoundUtil.distance3D(a, b)
-
-	if a == nil or b == nil then
-		return 0
-	end
-
-
-	local dx = a.x - b.x
-
-	local dy = a.y - b.y
-
-	local dz = a.z - b.z
-
-
-	return sqrt(
-		dx * dx +
-		dy * dy +
-		dz * dz
-	)
-
-end
-
-
-------------------------------------------------------------------------------
--- Математика
-------------------------------------------------------------------------------
-
---- Ограничивает значение диапазоном.
----@param value number
----@param min number
----@param max number
----@return number
-------------------------------------------------------------------------------
-function AmbientSoundUtil.clamp(
-	value,
-	min,
-	max
-)
-
-	if value < min then
-
-		return min
-
-	elseif value > max then
-
-		return max
-
-	end
-
-
-	return value
-
-end
-
-
-------------------------------------------------------------------------------
---- Округляет число.
----@param value number
----@param decimals number
----@return number
-------------------------------------------------------------------------------
-function AmbientSoundUtil.round(
-	value,
-	decimals
-)
-
-	decimals = decimals or 0
-
-
-	local multiplier = 10 ^ decimals
-
-
-	return floor(
-		value * multiplier + 0.5
-	) / multiplier
-
-end
-
-
-------------------------------------------------------------------------------
--- Работа с объектами
-------------------------------------------------------------------------------
-
---- Безопасное удаление объекта.
---
--- Используется для:
---  • Sound;
---  • Event;
---  • временных объектов.
---
----@param object any
-------------------------------------------------------------------------------
-function AmbientSoundUtil.deleteObject(object)
-
-	if object == nil then
-		return
-	end
-
-
-	if object.delete ~= nil then
-
-		object:delete()
-
-	end
-
-end
-
-
-------------------------------------------------------------------------------
--- Общие функции
-------------------------------------------------------------------------------
-
---- Возвращает значение по умолчанию.
----@param value any
----@param default any
----@return any
-------------------------------------------------------------------------------
-function AmbientSoundUtil.defaultValue(
-	value,
-	default
-)
-
-	if value == nil then
-
-		return default
-
-	end
-
-
-	return value
-
-end
-
-
-------------------------------------------------------------------------------
---- Проверяет существование значения в таблице.
----@param tableValue table
----@param searchValue any
----@return boolean
-------------------------------------------------------------------------------
-function AmbientSoundUtil.contains(
-	tableValue,
-	searchValue
-)
-
-	if tableValue == nil then
-
-		return false
-
-	end
-
-
-	for _, value in pairs(tableValue) do
-
-		if value == searchValue then
-
+	season = string.upper(season)
+	for _, value in ipairs(config.seasons) do
+		if value == season then
 			return true
-
 		end
-
 	end
-
 
 	return false
-
 end
 
+------------------------------------------------------------------------------
+-- Проверка погоды
+------------------------------------------------------------------------------
+function AmbientSoundUtil.checkWeather(config)
+	if config.weather == nil then
+		return true
+	end
+	if #config.weather == 0 then
+		return true
+	end
+	local weather =
+		AmbientSoundUtil.getCurrentWeather()
+	if weather == nil then
+		return true
+	end
+	weather = string.upper(weather)
+	for _, value in ipairs(config.weather) do
+		if value == weather then
+			return true
+		end
+	end
+	return false
+end
 
 ------------------------------------------------------------------------------
--- Завершение загрузки
+-- Получение текущего сезона
 ------------------------------------------------------------------------------
+function AmbientSoundUtil.getCurrentSeason()
+	if g_currentMission == nil then
+		return nil
+	end
+	local environment = g_currentMission.environment
+	if environment == nil then
+		return nil
+	end
+	if environment.currentSeason ~= nil then
+		return tostring(environment.currentSeason)
+	end
+	if environment.season ~= nil then
+		return tostring(environment.season)
+	end
+	return nil
+end
 
-AmbientSoundUtil.info(
-	"Модуль AmbientSoundUtil загружен"
-)
+------------------------------------------------------------------------------
+-- Получение текущей погоды
+------------------------------------------------------------------------------
+function AmbientSoundUtil.getCurrentWeather()
+	if g_currentMission == nil then
+		return nil
+	end
+	local environment = g_currentMission.environment
+	if environment == nil then
+		return nil
+	end
+	if environment.weather ~= nil then
+		return tostring(environment.weather)
+	end
+	if environment.weatherType ~= nil then
+		return tostring(environment.weatherType)
+	end
+	return nil
+end
+
+------------------------------------------------------------------------------
+-- Случайная точка внутри радиуса
+------------------------------------------------------------------------------
+function AmbientSoundUtil.randomPointInRadius(x, y, z, radius)
+	local angle = math.random() * math.pi * 2
+	local distance = math.random() * radius
+	return {x = x + math.cos(angle) * distance, y = y, z = z + math.sin(angle) * distance}
+end
+
+------------------------------------------------------------------------------
+-- Случайная точка на окружности
+------------------------------------------------------------------------------
+function AmbientSoundUtil.randomPointOnRadius(x, y, z, radius)
+	local angle = math.random() * math.pi * 2
+	return {x = x + math.cos(angle) * radius, y = y, z = z + math.sin(angle) * radius }
+end
+
+------------------------------------------------------------------------------
+-- Движение к цели
+------------------------------------------------------------------------------
+function AmbientSoundUtil.moveTowards(x, y, z, targetX, targetY, targetZ, speed)
+	local dx = targetX - x
+	local dy = targetY - y
+	local dz = targetZ - z
+	local distance = MathUtil.vector3Length(dx, dy, dz)
+
+	if distance < 0.001 then
+		return targetX, targetY, targetZ
+	end
+	local step = math.min(speed, distance)
+	return x + dx / distance * step, y + dy / distance * step, z + dz / distance * step
+end
+
+------------------------------------------------------------------------------
+-- Разбор строки "x y z"
+------------------------------------------------------------------------------
+function AmbientSoundUtil.parseVector3(value)
+	local result = {}
+	for token in string.gmatch(value, "%S+") do
+		table.insert(result, tonumber(token))
+	end
+	return result[1] or 0, result[2] or 0, result[3] or 0
+end
+
+------------------------------------------------------------------------------
+-- Разделение строки
+------------------------------------------------------------------------------
+function AmbientSoundUtil.split(str, separator)
+	local result = {}
+	separator = separator or ","
+	local pattern
+	if separator == " " then
+		pattern = "%S+"
+	else
+		pattern = "([^" .. separator .. "]+)"
+	end
+	for value in string.gmatch(str, pattern) do
+		value = value:gsub("^%s+", "")
+		value = value:gsub("%s+$", "")
+		if value ~= "" then
+			table.insert(result, value)
+		end
+	end
+	return result
+end

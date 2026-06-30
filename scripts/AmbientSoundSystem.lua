@@ -1,44 +1,42 @@
 ------------------------------------------------------------------------------
 -- AmbientSoundSystem.lua
 --
--- Ambient Sound System v2.0
---
--- Главный менеджер системы окружающих звуков.
+-- Главный менеджер Ambient Sound System
 --
 -- Отвечает за:
---   • загрузку конфигурации;
---   • создание Scheduler;
---   • создание Runtime экземпляров;
---   • обновление активных звуков;
---   • сетевую синхронизацию;
---   • удаление экземпляров.
---
--- Сам НЕ занимается:
---   • проигрыванием Sample;
---   • логикой движения;
---   • чтением XML.
+--   • загрузку XML;
+--   • создание экземпляров AmbientSound;
+--   • работу Scheduler;
+--   • обновление звуков;
+--   • синхронизацию мультиплеера.
 ------------------------------------------------------------------------------
+
 AmbientSoundSystem = {}
 local AmbientSoundSystem_mt = Class(AmbientSoundSystem)
 
 ------------------------------------------------------------------------------
--- Конструктор
+-- Создание объекта
 ------------------------------------------------------------------------------
+
 function AmbientSoundSystem.new(customMt)
 	local self = setmetatable({}, customMt or AmbientSoundSystem_mt)
+
 	-- Конфигурация
 	self.soundFiles = {}
 	self.configs = {}
 	self.configsById = {}
-	-- Runtime
-	-- runtimeId -> AmbientSound
+
+	-- Активные экземпляры
 	self.activeSounds = {}
 	self.nextRuntimeId = 1
+
 	-- Scheduler
 	self.scheduler = nil
-	-- Состояние системы
+
+	-- Состояние
 	self.enabled = true
 	self.initialized = false
+
 	-- XML
 	self.xmlFilename = "ambientSounds.xml"
 	return self
@@ -47,48 +45,47 @@ end
 ------------------------------------------------------------------------------
 -- Инициализация
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:initialize()
+function AmbientSoundSystem:initialize(xmlFilename)
 	if self.initialized then
 		return true
 	end
-	AmbientSoundUtil.info("========================================")
-	AmbientSoundUtil.info("Запуск Ambient Sound System")
-	AmbientSoundUtil.info("========================================")
-	-- Загружаем XML
-	self.soundFiles,
-	self.configs = AmbientSoundXML.load(self.xmlFilename)
+
+	if xmlFilename ~= nil then
+		self.xmlFilename = xmlFilename
+	end
+
+	AmbientSoundUtil.info("----------------------------------------")
+	AmbientSoundUtil.info("Инициализация Ambient Sound System")
+	AmbientSoundUtil.info("----------------------------------------")
+
+	-- Загрузка XML
+	local soundFiles, configs = AmbientSoundXML.load(self.xmlFilename)
+	if soundFiles == nil or configs == nil then
+		AmbientSoundUtil.error("Не удалось загрузить '%s'",tostring(self.xmlFilename))
+		return false
+	end
+	self.soundFiles = soundFiles
+	self.configs = configs
+
 	-- Индексация конфигураций
-	self:buildConfigIndex()
-	-- Создаем Scheduler
-	self.scheduler = AmbientSoundScheduler.new(
-			self.configs,
-			function(config)
-				self:onSchedulerTrigger(config)
-			end
-		)
-	self.scheduler:reset()
-	-- Глобальная ссылка
-	g_ambientSoundSystem = self
+	self.configsById = {}
+	for _, config in ipairs(self.configs) do
+		self.configsById[config.id] = config
+	end
+	AmbientSoundUtil.info("Загружено конфигураций: %d", #self.configs)
+
+	-- Создание Scheduler
+	self.scheduler = AmbientSoundScheduler.new(self.configs)
+	if self.scheduler ~= nil then
+		self.scheduler:reset()
+	end
 	self.initialized = true
-	AmbientSoundUtil.info("Загружено конфигураций: %d", table.count(self.configs))
-	AmbientSoundUtil.info("Ambient Sound System успешно запущена")
+	AmbientSoundUtil.info("Система успешно запущена.")
 	return true
 end
 
 ------------------------------------------------------------------------------
--- Создание быстрого индекса конфигураций
-------------------------------------------------------------------------------
-function AmbientSoundSystem:buildConfigIndex()
-	self.configsById = {}
-	for _, config in ipairs(self.configs) do
-		self.configsById[config.id] = config
-		config.fileCache = self.soundFiles
-		AmbientSoundUtil.debug("Конфигурация %d проиндексирована", config.id)
-	end
-end
-
-------------------------------------------------------------------------------
--- Обновление системы
+-- Основное обновление
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:update(dt)
 	if not self.enabled then
@@ -97,79 +94,85 @@ function AmbientSoundSystem:update(dt)
 	if not self.initialized then
 		return
 	end
-	-- Scheduler
-	if self.scheduler ~= nil then
-		self.scheduler:update(dt)
+
+	-- Получаем список конфигураций,
+	-- время которых наступило.
+	local readyConfigs = self.scheduler:update(dt)
+	if readyConfigs ~= nil then
+		for _, config in ipairs(readyConfigs) do
+			self:createRuntimeSound(config)
+		end
 	end
-	-- Runtime
+
+	-- Обновляем активные экземпляры
 	self:updateRuntimeSounds(dt)
 end
 
 ------------------------------------------------------------------------------
--- Callback Scheduler
-------------------------------------------------------------------------------
-function AmbientSoundSystem:onSchedulerTrigger(config)
-	if config == nil then
-		return
-	end
-	self:createRuntimeSound(config)
-end
-
-------------------------------------------------------------------------------
--- Создание Runtime экземпляра
+-- Создание экземпляра звука
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:createRuntimeSound(config)
 	if config == nil then
 		return nil
 	end
-
-	-- Определяем позицию появления
 	local position = self:getSpawnPosition(config)
 	if position == nil then
-		AmbientSoundUtil.warning("Не удалось определить позицию появления звука ID=%d", config.id)
+		AmbientSoundUtil.warning("Не удалось определить позицию появления для ID=%d", config.id)
 		return nil
 	end
 
-	-- Создаем Runtime объект
-	local runtimeSound = AmbientSound.new(config, position)
-
-	-- Назначаем Runtime ID
+	local runtimeSound = AmbientSound.new(config)
 	runtimeSound.runtimeId = self.nextRuntimeId
 	self.nextRuntimeId = self.nextRuntimeId + 1
-
-	-- Загружаем Sample
+	runtimeSound:setPosition(position)
 	if not runtimeSound:load() then
-		AmbientSoundUtil.warning("Не удалось загрузить RuntimeSound %d",runtimeSound.runtimeId)
+		AmbientSoundUtil.warning("Ошибка загрузки Runtime #%d",runtimeSound.runtimeId)
 		return nil
 	end
 
-	-- Регистрируем экземпляр
 	self.activeSounds[runtimeSound.runtimeId] = runtimeSound
-	AmbientSoundUtil.debug("Создан RuntimeSound #%d (config=%d)", runtimeSound.runtimeId, config.id)
+	AmbientSoundUtil.debug("Создан Runtime #%d (config=%d)", runtimeSound.runtimeId, config.id)
 
-	-- Запуск
 	if config.type == "global" then
-		-- Сервер запускает локально
 		if AmbientSoundUtil.isServer() then
 			runtimeSound:play()
-			AmbientSoundPlayEvent.sendEvent(runtimeSound.runtimeId, config.id, position, config.volume)
+			AmbientSoundPlayEvent.sendEvent(runtimeSound.runtimeId, config.id, position)
 		end
 	else
-		-- Локальный звук
 		runtimeSound:play()
 	end
+
 	return runtimeSound
 end
 
 ------------------------------------------------------------------------------
--- Поиск Runtime объекта
+-- Обновление активных экземпляров
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRuntimeSound(runtimeId)
-	return self.activeSounds[runtimeId]
+function AmbientSoundSystem:updateRuntimeSounds(dt)
+	local removeList = {}
+	for runtimeId, runtimeSound in pairs(self.activeSounds) do
+		-- Обновление экземпляра
+		runtimeSound:update(dt)
+		-- Если звук движется, сервер синхронизирует позицию
+		if runtimeSound:isMoving() and runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
+			local position = runtimeSound:getPosition()
+			AmbientSoundMoveEvent.sendEvent(runtimeId, position.x, position.y, position.z)
+		end
+
+		-- Закончил воспроизведение
+		if runtimeSound:isFinished() then
+			table.insert(removeList,runtimeId)
+		end
+	end
+
+	-- Удаляем завершённые экземпляры
+	for _, runtimeId in ipairs(removeList) do
+		self:removeRuntimeSound(runtimeId)
+	end
 end
 
 ------------------------------------------------------------------------------
--- Удаление Runtime объекта
+-- Удаление Runtime экземпляра
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:removeRuntimeSound(runtimeId)
 	local runtimeSound = self.activeSounds[runtimeId]
@@ -177,16 +180,22 @@ function AmbientSoundSystem:removeRuntimeSound(runtimeId)
 		return
 	end
 
-	-- MP
+	-- Если это глобальный звук, сообщаем клиентам
 	if runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
 		AmbientSoundStopEvent.sendEvent(runtimeId)
 	end
 
-	-- Удаляем объект
 	runtimeSound:stop()
 	runtimeSound:delete()
 	self.activeSounds[runtimeId] = nil
-	AmbientSoundUtil.debug("RuntimeSound #%d удалён", runtimeId)
+	AmbientSoundUtil.debug("Удалён Runtime #%d", runtimeId)
+end
+
+------------------------------------------------------------------------------
+-- Получение Runtime экземпляра
+------------------------------------------------------------------------------
+function AmbientSoundSystem:getRuntimeSound(runtimeId)
+	return self.activeSounds[runtimeId]
 end
 
 ------------------------------------------------------------------------------
@@ -197,47 +206,17 @@ function AmbientSoundSystem:getConfig(configId)
 end
 
 ------------------------------------------------------------------------------
--- Обновление всех Runtime объектов
-------------------------------------------------------------------------------
-function AmbientSoundSystem:updateRuntimeSounds(dt)
-	for runtimeId, runtimeSound in pairs(self.activeSounds) do
-		runtimeSound:update(dt)
-		-- Движение глобального объекта
-		if runtimeSound:isMoving() and runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
-			AmbientSoundMoveEvent.sendEvent(runtimeId, runtimeSound:getPosition())
-		end
-
-		-- Проверка завершения
-		if runtimeSound:isFinished() then
-			self:removeRuntimeSound(runtimeId)
-		end
-	end
-end
-
-------------------------------------------------------------------------------
 -- Определение позиции появления
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:getSpawnPosition(config)
-	if config == nil then
-		return nil
-	end
-
-	-- Статическая точка
 	if config.mode == "static" then
 		return self:getStaticPosition(config)
+	elseif config.mode == "running" then
+		return self:getRunningPosition(config)
+	elseif config.mode == "fly" then
+		return self:getFlyPosition(config)
 	end
-
-	-- Бегущий объект
-	if config.mode == "running" then
-		return self:getPlayerDistancePosition(config)
-	end
-
-	-- Летающий объект
-	if config.mode == "fly" then
-		return self:getPlayerFlyPosition(config)
-	end
-
-	AmbientSoundUtil.warning("Неизвестный режим '%s'", tostring(config.mode))
+	AmbientSoundUtil.warning("Неизвестный режим '%s'",tostring(config.mode))
 	return nil
 end
 
@@ -248,44 +227,38 @@ function AmbientSoundSystem:getStaticPosition(config)
 	if config.translation == nil then
 		return nil
 	end
-	local position = {
-		x = config.translation.x,
-		y = config.translation.y,
-		z = config.translation.z
-	}
-
-	if config.randomRadius ~= nil and config.randomRadius > 0 then
-		position = AmbientSoundUtil.randomPointInRadius( position.x, position.y, position.z, config.randomRadius)
+	local position = { x = config.translation.x, y = config.translation.y, z = config.translation.z}
+	if config.randomRadius ~= nil
+		and config.randomRadius > 0 then
+		position = AmbientSoundUtil.randomPointInRadius(position.x, position.y, position.z, config.randomRadius)
 	end
 	return position
 end
 
 ------------------------------------------------------------------------------
--- Позиция на расстоянии от случайного игрока
+-- Позиция бегущего объекта
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getPlayerDistancePosition(config)
+function AmbientSoundSystem:getRunningPosition(config)
 	local player = self:getRandomPlayer()
 	if player == nil then
 		return nil
 	end
 
-	local x, y, z = getWorldTranslation(player.rootNode)
-	local distance = config.distancePlayer or 100
+	local x, y, z = AmbientSoundUtil.getPlayerWorldPosition(player)
+	local distance = config.distancePlayer or 120
 	return AmbientSoundUtil.randomPointOnRadius(x, y, z, distance)
 end
 
 ------------------------------------------------------------------------------
--- Позиция около игрока
+-- Позиция локального летающего объекта
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getPlayerFlyPosition(config)
+function AmbientSoundSystem:getFlyPosition(config)
 	local player = self:getRandomPlayer()
 	if player == nil then
 		return nil
 	end
-
-	local x, y, z = getWorldTranslation(player.rootNode)
-	local radius = config.distancePlayer or 1.5
-	return AmbientSoundUtil.randomPointInRadius(x, y + 1.6, z, radius)
+	local x, y, z = AmbientSoundUtil.getPlayerWorldPosition(player)
+	return AmbientSoundUtil.randomPointInRadius(x, y + (config.heightOffset or 1.6), z, config.distancePlayer or 1.0)
 end
 
 ------------------------------------------------------------------------------
@@ -305,55 +278,22 @@ function AmbientSoundSystem:getRandomPlayer()
 	if players == nil then
 		return nil
 	end
-	local count = 0
-	for _, _ in pairs(players) do
-		count = count + 1
+
+	local list = {}
+	for _, player in pairs(players) do
+		if player ~= nil and player.rootNode ~= nil then
+			table.insert(list, player)
+		end
 	end
-	if count == 0 then
+
+	if #list == 0 then
 		return nil
 	end
-	local index = math.random(count)
-	local current = 1
-	for _, player in pairs(players) do
-		if current == index then
-			return player
-		end
-		current = current + 1
-	end
-	return nil
+	return list[math.random(#list)]
 end
 
 ------------------------------------------------------------------------------
--- Остановка всех Runtime объектов
-------------------------------------------------------------------------------
-function AmbientSoundSystem:stopAll()
-	local removeList = {}
-	for runtimeId, _ in pairs(self.activeSounds) do
-		table.insert(removeList, runtimeId)
-	end
-
-	for _, runtimeId in ipairs(removeList) do
-		self:removeRuntimeSound(runtimeId)
-	end
-end
-
-------------------------------------------------------------------------------
--- Включение системы
-------------------------------------------------------------------------------
-function AmbientSoundSystem:setEnabled(state)
-	self.enabled = state == true
-	AmbientSoundUtil.info("Ambient Sound System %s", self.enabled and "включена" or "выключена")
-end
-
-------------------------------------------------------------------------------
--- Проверка активности
-------------------------------------------------------------------------------
-function AmbientSoundSystem:isEnabled()
-	return self.enabled
-end
-
-------------------------------------------------------------------------------
--- Количество активных Runtime объектов
+-- Возвращает количество активных экземпляров
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:getRuntimeCount()
 	local count = 0
@@ -364,55 +304,82 @@ function AmbientSoundSystem:getRuntimeCount()
 end
 
 ------------------------------------------------------------------------------
+-- Остановка всех активных звуков
+------------------------------------------------------------------------------
+function AmbientSoundSystem:stopAll()
+	local runtimeIds = {}
+	for runtimeId, _ in pairs(self.activeSounds) do
+		table.insert(runtimeIds, runtimeId)
+	end
+	for _, runtimeId in ipairs(runtimeIds) do
+		self:removeRuntimeSound(runtimeId)
+	end
+end
+
+------------------------------------------------------------------------------
+-- Включение / отключение системы
+------------------------------------------------------------------------------
+function AmbientSoundSystem:setEnabled(state)
+	self.enabled = state == true
+	AmbientSoundUtil.info("Ambient Sound System %s", self.enabled and "включена" or "отключена")
+end
+
+------------------------------------------------------------------------------
+-- Проверка активности
+------------------------------------------------------------------------------
+function AmbientSoundSystem:isEnabled()
+	return self.enabled
+end
+
+------------------------------------------------------------------------------
 -- Отладочная информация
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:printDebug()
 	AmbientSoundUtil.info("----------------------------------------")
 	AmbientSoundUtil.info("Статистика Ambient Sound System")
 	AmbientSoundUtil.info("----------------------------------------")
-	AmbientSoundUtil.info("Конфигураций: %d", table.count(self.configs))
-	AmbientSoundUtil.info("Активных Runtime: %d", self:getRuntimeCount())
-	AmbientSoundUtil.info("Следующий RuntimeID: %d", self.nextRuntimeId)
+	AmbientSoundUtil.info("Конфигураций: %d", #self.configs)
+	AmbientSoundUtil.info("Активных экземпляров: %d", self:getRuntimeCount())
+	AmbientSoundUtil.info("Следующий Runtime ID: %d", self.nextRuntimeId)
+	for runtimeId, runtimeSound in pairs(self.activeSounds) do
+		AmbientSoundUtil.info("Runtime #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
+	end
 end
 
 ------------------------------------------------------------------------------
--- Удаление системы
+-- Очистка системы
 ------------------------------------------------------------------------------
 function AmbientSoundSystem:delete()
-	AmbientSoundUtil.info("Удаление Ambient Sound System...")
+	AmbientSoundUtil.info("Остановка Ambient Sound System...")
 	self:stopAll()
 	if self.scheduler ~= nil then
 		self.scheduler:delete()
 		self.scheduler = nil
 	end
-	self.activeSounds = {}
+	self.nextRuntimeId = 1
 	self.configs = {}
 	self.configsById = {}
 	self.soundFiles = {}
 	self.initialized = false
+
 	if g_ambientSoundSystem == self then
 		g_ambientSoundSystem = nil
 	end
-	AmbientSoundUtil.info("Ambient Sound System успешно удалена")
+
+	AmbientSoundUtil.info("Ambient Sound System остановлена.")
 end
 
 ------------------------------------------------------------------------------
--- Возвращает Runtime объект
+-- Проверка существования Runtime
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRuntime(runtimeId)
-	return self.activeSounds[runtimeId]
-end
 
-------------------------------------------------------------------------------
--- Возвращает конфигурацию по ID
-------------------------------------------------------------------------------
-function AmbientSoundSystem:getConfigById(configId)
-	return self.configsById[configId]
-end
-
-------------------------------------------------------------------------------
--- Проверка существования Runtime объекта
-------------------------------------------------------------------------------
 function AmbientSoundSystem:hasRuntime(runtimeId)
 	return self.activeSounds[runtimeId] ~= nil
+end
+
+------------------------------------------------------------------------------
+-- Получение списка активных Runtime
+------------------------------------------------------------------------------
+function AmbientSoundSystem:getActiveSounds()
+	return self.activeSounds
 end

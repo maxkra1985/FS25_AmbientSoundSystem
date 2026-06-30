@@ -1,577 +1,144 @@
--- ЧАСТЬ 1
 ------------------------------------------------------------------------------
 -- AmbientSoundXML.lua
 --
--- Загрузчик конфигурации Ambient Sound.
---
--- Отвечает за:
---   • чтение ambientSounds.xml;
---   • загрузку файлов звуков;
---   • преобразование XML в Lua таблицы;
---   • подготовку данных для Scheduler.
---
--- Не отвечает за:
---   • воспроизведение;
---   • сетевую синхронизацию;
---   • движение источников.
+-- Загрузка конфигурации Ambient Sound System из XML.
 ------------------------------------------------------------------------------
-
 AmbientSoundXML = {}
-
 
 ------------------------------------------------------------------------------
 -- Загрузка XML
 ------------------------------------------------------------------------------
-
---- Загружает конфигурацию ambientSounds.xml.
---
--- Возвращает:
--- soundFiles - список файлов
--- sounds     - список описаний звуков
---
----@param filename string
----@return table, table
-------------------------------------------------------------------------------
-function AmbientSoundXML.load(filename)
-
-	local soundFiles = {}
-
-	local sounds = {}
-
-
-	if filename == nil then
-
-		AmbientSoundUtil.error(
-			"Не указан файл конфигурации AmbientSound"
-		)
-
-		return soundFiles, sounds
-
+function AmbientSoundXML.load(xmlFilename)
+	if xmlFilename == nil then
+		return nil, nil
 	end
-
-
-	local xmlFile = XMLFile.load(
-		"ambientSounds",
-		filename,
-		AmbientSoundXML.xmlSchema
-	)
-
-
+	if not fileExists(xmlFilename) then
+		AmbientSoundUtil.error("XML файл не найден: %s", tostring(xmlFilename))
+		return nil, nil
+	end
+	local xmlFile = loadXMLFile("AmbientSoundsXML",xmlFilename)
 	if xmlFile == nil then
-
-		AmbientSoundUtil.error(
-			"Не удалось открыть XML: %s",
-			filename
-		)
-
-		return soundFiles, sounds
-
+		AmbientSoundUtil.error("Не удалось открыть XML: %s", tostring(xmlFilename))
+		return nil, nil
 	end
 
-
-	AmbientSoundXML.loadSoundFiles(
-		xmlFile,
-		soundFiles
-	)
-
-
-	AmbientSoundXML.loadSounds(
-		xmlFile,
-		sounds
-	)
-
-
-	xmlFile:delete()
-
-
-	AmbientSoundUtil.info(
-		"Загружено файлов звуков: %d",
-		AmbientSoundUtil.tableSize(soundFiles)
-	)
-
-
-	AmbientSoundUtil.info(
-		"Загружено описаний звуков: %d",
-		AmbientSoundUtil.tableSize(sounds)
-	)
-
-
-	return soundFiles, sounds
-
-end
-
-
-------------------------------------------------------------------------------
--- Загрузка списка файлов
-------------------------------------------------------------------------------
-
---- Загружает секцию soundFiles.
----@param xmlFile XMLFile
----@param result table
-------------------------------------------------------------------------------
-function AmbientSoundXML.loadSoundFiles(
-	xmlFile,
-	result
-)
-
-
+	-- SoundFiles
+	local soundFiles = {}
 	local index = 0
+	while true do
+		local key = string.format("ambientSounds.soundFiles.soundFile(%d)", index)
+		if not hasXMLProperty(xmlFile, key) then
+			break
+		end
 
-
-	while xmlFile:hasProperty(
-		string.format(
-			"ambientSounds.soundFiles.soundFile(%d)",
-			index
-		)
-	) do
-
-
-		local key = string.format(
-			"ambientSounds.soundFiles.soundFile(%d)",
-			index
-		)
-
-
-		local id = xmlFile:getInt(
-			key .. "#id"
-		)
-
-
-		local filename = xmlFile:getString(
-			key .. "#filename"
-		)
-
-
+		local id = getXMLInt(xmlFile, key .. "#id")
+		local filename = getXMLString(xmlFile, key .. "#filename")
 		if id ~= nil and filename ~= nil then
-
-
-			result[id] = {
-
-				id = id,
-
-				filename = filename
-
-			}
-
-
+			soundFiles[id] = filename
+			AmbientSoundUtil.debug("SoundFile %d -> %s", id, filename)
 		end
-
-
 		index = index + 1
-
-
 	end
 
-end
-
-
-------------------------------------------------------------------------------
--- Загрузка описаний звуков
-------------------------------------------------------------------------------
-
---- Загружает секцию sounds.
----@param xmlFile XMLFile
----@param result table
-------------------------------------------------------------------------------
-function AmbientSoundXML.loadSounds(
-	xmlFile,
-	result
-)
-
-
-	local index = 0
-
-
-	while xmlFile:hasProperty(
-		string.format(
-			"ambientSounds.sounds.sound(%d)",
-			index
-		)
-	) do
-
-
-		local key = string.format(
-			"ambientSounds.sounds.sound(%d)",
-			index
-		)
-
-
-		local sound = AmbientSoundXML.loadSound(
-			xmlFile,
-			key,
-			index
-		)
-
-
-		if sound ~= nil then
-
-			table.insert(
-				result,
-				sound
-			)
-
+	-- Sounds
+	local configs = {}
+	index = 0
+	while true do
+		local key = string.format("ambientSounds.sounds.sound(%d)", index)
+		if not hasXMLProperty(xmlFile, key) then
+			break
 		end
-
-
+		local config = AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
+		if config ~= nil then
+			config.id = index + 1
+			table.insert(configs, config)
+		end
 		index = index + 1
-
-
 	end
 
+	delete(xmlFile)
+	AmbientSoundUtil.info("Загружено %d описаний звуков.", #configs)
+	return soundFiles, configs
 end
 
-
--- ЧАСТЬ 2
 ------------------------------------------------------------------------------
 -- Загрузка одного описания звука
 ------------------------------------------------------------------------------
-
---- Загружает один элемент sound.
----@param xmlFile XMLFile
----@param key string
----@param index number
----@return table|nil
-------------------------------------------------------------------------------
-function AmbientSoundXML.loadSound(
-	xmlFile,
-	key,
-	index
-)
-
-
-	local sound = {}
-
-
-	--------------------------------------------------------------------------
+function AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
+	local config = {}
 	-- Основные параметры
-	--------------------------------------------------------------------------
+	config.type = getXMLString(xmlFile, key .. "#type") or "global"
+	config.mode = getXMLString(xmlFile, key .. "#mode") or "static"
+	config.volume = getXMLFloat(xmlFile, key .. "#volume") or 1
+	config.range = getXMLFloat(xmlFile, key .. "#range") or 150
+	config.innerRange = getXMLFloat(xmlFile, key .. "#innerRange") or 5
+	config.randomRadius = getXMLFloat(xmlFile, key .. "#randomRadius") or 0
+	config.distancePlayer = getXMLFloat(xmlFile, key .. "#distancePlayer") or 0
+	config.heightOffset = getXMLFloat(xmlFile, key .. "#heightOffset") or 1.6
 
-	sound.id = index + 1
-
-
-	sound.type =
-		AmbientSoundXML.parseType(
-			xmlFile:getString(
-				key .. "#type"
-			)
-		)
-
-
-	sound.mode =
-		AmbientSoundXML.parseMode(
-			xmlFile:getString(
-				key .. "#mode"
-			)
-		)
-
-
-	--------------------------------------------------------------------------
-	-- Файлы
-	--------------------------------------------------------------------------
-
-	sound.soundFiles =
-		AmbientSoundXML.parseSoundFiles(
-			xmlFile:getString(
-				key .. "#soundFiles"
-			)
-		)
-
-
-	if #sound.soundFiles == 0 then
-
-		AmbientSoundUtil.warning(
-			"Звук %d не содержит файлов",
-			sound.id
-		)
-
-		return nil
-
-	end
-
-
-	--------------------------------------------------------------------------
-	-- Позиция
-	--------------------------------------------------------------------------
-
-	sound.translation =
-		AmbientSoundUtil.parseTranslation(
-			xmlFile:getString(
-				key .. "#translation"
-			)
-		)
-
-
-	sound.randomRadius =
-		xmlFile:getFloat(
-			key .. "#randomRadius",
-			0
-		)
-
-
-	--------------------------------------------------------------------------
-	-- Дистанция
-	--------------------------------------------------------------------------
-
-	sound.range =
-		xmlFile:getFloat(
-			key .. "#range",
-			100
-		)
-
-
-	sound.innerRange =
-		xmlFile:getFloat(
-			key .. "#innerRange",
-			0
-		)
-
-
-	sound.volume =
-		xmlFile:getFloat(
-			key .. "#volume",
-			1
-		)
-
-
-	--------------------------------------------------------------------------
 	-- Время
-	--------------------------------------------------------------------------
+	config.startHour = getXMLInt(xmlFile, key .. "#startHour") or 0
+	config.endHour = getXMLInt(xmlFile, key .. "#endHour") or 24
+	config.minDelay = getXMLInt(xmlFile, key .. "#minDelay") or 60
+	config.maxDelay = getXMLInt(xmlFile, key .. "#maxDelay") or 120
 
-	sound.startHour =
-		xmlFile:getFloat(
-			key .. "#startHour",
-			0
-		)
-
-
-	sound.endHour =
-		xmlFile:getFloat(
-			key .. "#endHour",
-			24
-		)
-
-
-	--------------------------------------------------------------------------
-	-- Задержка
-	--------------------------------------------------------------------------
-
-	sound.minDelay =
-		xmlFile:getFloat(
-			key .. "#minDelay",
-			60
-		)
-
-
-	sound.maxDelay =
-		xmlFile:getFloat(
-			key .. "#maxDelay",
-			sound.minDelay
-		)
-
-
-	--------------------------------------------------------------------------
-	-- Условия
-	--------------------------------------------------------------------------
-
-	sound.weather =
-		AmbientSoundXML.parseList(
-			xmlFile:getString(
-				key .. "#wheater"
-			)
-		)
-
-
-	sound.seasons =
-		AmbientSoundXML.parseList(
-			xmlFile:getString(
-				key .. "#seasons"
-			)
-		)
-
-
-	--------------------------------------------------------------------------
 	-- Движение
-	--------------------------------------------------------------------------
+	config.moveInterval = getXMLFloat(xmlFile, key .. "#moveInterval") or 0
+	config.moveSpeed = getXMLFloat(xmlFile, key .. "#moveSpeed") or 0
 
-	sound.distancePlayer =
-		xmlFile:getFloat(
-			key .. "#distancePlayer",
-			0
-		)
-
-
-	sound.moveInterval =
-		xmlFile:getFloat(
-			key .. "#moveInterval",
-			0
-		)
-
-
-	sound.moveSpeed =
-		xmlFile:getFloat(
-			key .. "#moveSpeed",
-			0
-		)
-
-
-	--------------------------------------------------------------------------
-	-- Runtime состояние
-	--------------------------------------------------------------------------
-
-	sound.runtime = {
-
-		nextPlayTime = 0,
-
-		activeInstances = 0
-
-	}
-
-
-	return sound
-
-end
-
-
-
-------------------------------------------------------------------------------
--- Преобразование списка файлов
-------------------------------------------------------------------------------
-
---- Преобразует:
---
--- "1,2,3"
---
--- в:
---
--- {1,2,3}
---
----@param value string
----@return table
-------------------------------------------------------------------------------
-function AmbientSoundXML.parseSoundFiles(value)
-
-	local result = {}
-
-
-	if value == nil then
-
-		return result
-
+	-- Координаты
+	local translation = getXMLString(xmlFile, key .. "#translation")
+	if translation ~= nil then
+		local x, y, z = AmbientSoundUtil.parseVector3(translation)
+		config.translation = { x = x, y = y, z = z }
 	end
 
+	-- Список файлов
+	config.soundFiles = {}
+	local fileList = getXMLString(xmlFile, key .. "#soundFiles")
 
-	local values =
-		AmbientSoundUtil.split(
-			value,
-			","
-		)
-
-
-	for _, id in ipairs(values) do
-
-
-		local number = tonumber(id)
-
-
-		if number ~= nil then
-
-			table.insert(
-				result,
-				number
-			)
-
+	if fileList ~= nil then
+		for _, value in ipairs(AmbientSoundUtil.split(fileList, ",")) do
+			local id = tonumber(value)
+			if id ~= nil and soundFiles[id] ~= nil then
+				table.insert(config.soundFiles, soundFiles[id])
+			end
 		end
-
-
 	end
 
-
-	return result
-
-end
-
-
-
-------------------------------------------------------------------------------
--- Преобразование списков условий
-------------------------------------------------------------------------------
-
---- Преобразует строку:
---
--- "WINTER SPRING SUMMER"
---
--- в таблицу.
---
----@param value string
----@return table
-------------------------------------------------------------------------------
-function AmbientSoundXML.parseList(value)
-	local result = {}
-
-	if value == nil then
-		return result
+	-- Погода
+	config.weather = {}
+	local weather = getXMLString(xmlFile, key .. "#weather")
+	if weather ~= nil then
+		for _, value in ipairs(AmbientSoundUtil.split(weather, " ")) do
+			table.insert(config.weather, string.upper(value))
+		end
 	end
 
-
-	local values =
-		AmbientSoundUtil.split(
-			value,
-			" "
-		)
-
-	for _, item in ipairs(values) do
-		table.insert(
-			result,
-			AmbientSoundUtil.toUpper(item)
-		)
-	end
-	return result
-
-end
-
-
-
-------------------------------------------------------------------------------
--- Тип звука
-------------------------------------------------------------------------------
-
-function AmbientSoundXML.parseType(value)
-	value =
-		AmbientSoundUtil.toLower(
-			value
-		)
-
-	if value == "local" then
-		return "local"
+	-- Сезоны
+	config.seasons = {}
+	local seasons = getXMLString(xmlFile, key .. "#seasons")
+	if seasons ~= nil then
+		for _, value in ipairs(AmbientSoundUtil.split(seasons, " ")) do
+			table.insert(config.seasons, string.upper(value))
+		end
 	end
 
-	return "global"
-end
-
-
-
-------------------------------------------------------------------------------
--- Режим звука
-------------------------------------------------------------------------------
-
-function AmbientSoundXML.parseMode(value)
-
-
-	value =
-		AmbientSoundUtil.toLower(
-			value
-		)
-
-
-	if value == "running" then
-		return "running"
+	-- Проверка конфигурации
+	if #config.soundFiles == 0 then
+		AmbientSoundUtil.warning("У звука отсутствуют soundFiles.")
+		return nil
 	end
 
-
-	if value == "fly" then
-		return "fly"
+	if config.maxDelay < config.minDelay then
+		local tmp = config.minDelay
+		config.minDelay = config.maxDelay
+		config.maxDelay = tmp
 	end
 
-	return "static"
+	if config.range < config.innerRange then
+		config.range = config.innerRange
+	end
 
+	return config
 end

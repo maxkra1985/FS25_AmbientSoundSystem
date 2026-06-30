@@ -1,67 +1,104 @@
 ------------------------------------------------------------------------------
 -- AmbientSound.lua
 --
--- Объект одного активного окружающего звука.
+-- Один экземпляр воспроизводимого окружающего звука.
 --
--- Отвечает за:
---   • создание источника;
---   • позиционирование;
---   • проигрывание;
+-- Экземпляр отвечает только за:
+--   • загрузку sample;
+--   • воспроизведение;
+--   • остановку;
 --   • движение;
---   • удаление.
+--   • обновление состояния.
 --
--- Не отвечает за:
---   • выбор времени запуска;
---   • XML;
---   • сетевую синхронизацию.
+-- Вопросами Scheduler, XML и Multiplayer занимается
+-- AmbientSoundSystem.
 ------------------------------------------------------------------------------
 AmbientSound = {}
-
 local AmbientSound_mt = Class(AmbientSound)
 
 ------------------------------------------------------------------------------
 -- Создание объекта
 ------------------------------------------------------------------------------
+function AmbientSound.new(customMt)
+	local self = setmetatable({}, customMt or AmbientSound_mt)
 
---- Создает экземпляр звука.
----@param config table
----@param position table
----@return table
-------------------------------------------------------------------------------
-function AmbientSound.new(config, position)
-	local self = setmetatable({}, AmbientSound_mt)
-	self.config = config
-	self.position = position or {x = 0, y = 0, z = 0}
-	self.source = nil
-	self.isPlaying = false
-	self.isFinished = false
+	-- Конфигурация
+	self.config = nil
+
+	-- Runtime
+	self.runtimeId = 0
+
+	-- Sample
+	self.sample = nil
+	self.sampleNode = nil
+
+	-- Положение
+	self.position = {x = 0, y = 0, z = 0}
+
+	-- Движение
+	self.targetPosition = {x = 0, y = 0, z = 0}
 	self.moveTimer = 0
-	self.lifeTime = 0
-	self.targetPosition = nil
+	self.moveInterval = 0
+	self.moveSpeed = 0
+
+	-- Состояние
+	self.loaded = false
+	self.playing = false
+	self.finished = false
 	return self
 end
 
 ------------------------------------------------------------------------------
--- Инициализация
+-- Назначение конфигурации
 ------------------------------------------------------------------------------
+function AmbientSound:setConfig(config)
+	self.config = config
+	self.moveInterval = config.moveInterval or 0
+	self.moveSpeed = config.moveSpeed or 0
+end
 
---- Подготавливает звук.
----@return boolean
+------------------------------------------------------------------------------
+-- Установка позиции
+------------------------------------------------------------------------------
+function AmbientSound:setPosition(position)
+	self.position.x = position.x
+	self.position.y = position.y
+	self.position.z = position.z
+
+	self.targetPosition.x = position.x
+	self.targetPosition.y = position.y
+	self.targetPosition.z = position.z
+end
+
+------------------------------------------------------------------------------
+-- Получение позиции
+------------------------------------------------------------------------------
+function AmbientSound:getPosition()
+	return self.position
+end
+
+------------------------------------------------------------------------------
+-- Загрузка
 ------------------------------------------------------------------------------
 function AmbientSound:load()
-	if self.config == nil then
-		AmbientSoundUtil.error("Попытка создать звук без конфигурации")
+	if self.loaded then
+		return true
+	end
+
+	-- Создание transform node
+	self.sampleNode = createTransformGroup("AmbientSound")
+	link(getRootNode(), self.sampleNode)
+	setTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
+
+	-- Создание Sample
+	self.sample = AmbientSoundUtil.createSample(self.config)
+	if self.sample == nil then
+		AmbientSoundUtil.warning( "Не удалось создать Sample.")
 		return false
 	end
-	self.source = createSample("AmbientSound_" .. self.config.id)
-	if self.source == nil then
-		AmbientSoundUtil.error("Не удалось создать Sample")
-		return false
-	end
-	setSampleRange(self.source, self.config.range)
-	setSampleInnerRange(self.source, self.config.innerRange)
-	setSampleVolume(self.source, self.config.volume)
-	self:updatePosition()
+
+	self.loaded = true
+	AmbientSoundUtil.debug("Runtime #%d загружен.", self.runtimeId)
 	return true
 end
 
@@ -69,178 +106,157 @@ end
 -- Запуск воспроизведения
 ------------------------------------------------------------------------------
 function AmbientSound:play()
-	if self.source == nil then
+	if not self.loaded then
 		return false
 	end
-	local file = self:getRandomSoundFile()
-	if file == nil then
-		AmbientSoundUtil.warning("Нет доступного звукового файла")
+	if self.playing then
+		return true
+	end
+	if self.sample == nil then
 		return false
 	end
-	loadSample(self.source, file.filename)
-	playSample(self.source)
-	self.isPlaying = true
-	AmbientSoundUtil.debug("Запущен звук ID=%d", self.config.id)
+
+	setTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
+	playSample(self.sample)
+	self.playing = true
+	self.finished = false
+	AmbientSoundUtil.debug("Runtime #%d запущен.", self.runtimeId)
 	return true
 end
 
 ------------------------------------------------------------------------------
--- Выбор варианта звука
-------------------------------------------------------------------------------
-function AmbientSound:getRandomSoundFile()
-	if self.config.soundFiles == nil then
-		return nil
-	end
-	local id = AmbientSoundUtil.randomElement(self.config.soundFiles)
-	if id == nil then
-		return nil
-	end
-	if self.config.fileCache == nil then
-		return nil
-	end
-	return self.config.fileCache[id]
-end
-------------------------------------------------------------------------------
--- Обновление позиции источника
-------------------------------------------------------------------------------
-
---- Устанавливает позицию Sample.
-------------------------------------------------------------------------------
-function AmbientSound:updatePosition()
-	if self.source == nil then
-		return
-	end
-	setTranslation(self.source,self.position.x,self.position.y,self.position.z)
-end
-
-------------------------------------------------------------------------------
--- Обновление объекта
-------------------------------------------------------------------------------
-
---- Основной update активного звука.
----@param dt number
-------------------------------------------------------------------------------
-------------------------------------------------------------------------------
--- Движение источника
-------------------------------------------------------------------------------
-function AmbientSound:updateMovement(dt)
-	self.moveTimer = self.moveTimer + dt
-	local interval = self.config.moveInterval * 1000
-	if interval <= 0 then
-		return
-	end
-	if self.moveTimer < interval then
-		return
-	end
-	self.moveTimer = 0
-	--------------------------------------------------------------------------
-	-- Глобальные движущиеся звуки
-	-- Двигает только сервер.
-	--------------------------------------------------------------------------
-	if self.config.type == "global" then
-		if AmbientSoundUtil.isServer() then
-			self:createMovementTarget()
-			AmbientSoundMoveEvent.sendEvent(self, self.targetPosition)
-		end
-		return
-	end
-	--------------------------------------------------------------------------
-	-- Локальные движущиеся звуки
-	--------------------------------------------------------------------------
-	self:createMovementTarget()
-end
-
-------------------------------------------------------------------------------
--- Движение источника
-------------------------------------------------------------------------------
-function AmbientSound:updateMovement(dt)
-	self.moveTimer = self.moveTimer + dt
-	local interval = self.config.moveInterval * 1000
-	if interval <= 0 then
-		return
-	end
-	if self.moveTimer < interval then
-		return
-	end
-	self.moveTimer = 0
-	if self.config.mode == "running" or self.config.mode == "fly" then
-		self:updateMovement(dt)
-	end
-	self:moveToTarget(dt)
-end
-
-------------------------------------------------------------------------------
--- Движение бегущего объекта
--- Хаотическое движение насекомых
-------------------------------------------------------------------------------
-function AmbientSound:createMovementTarget()
-    if self.config.mode == "running" then
-        local angle = AmbientSoundUtil.randomFloat(0, math.pi * 2)
-        local distance = AmbientSoundUtil.randomFloat(20, 60)
-        self.targetPosition = {
-            x = self.position.x + math.cos(angle)*distance,
-            y = self.position.y,
-            z = self.position.z + math.sin(angle)*distance
-        }
-    elseif self.config.mode == "fly" then
-        local point = AmbientSoundUtil.randomPointInRadius(0, 0, 0, 2)
-        self.targetPosition = {
-            x = self.position.x + point.x,
-            y = self.position.y + AmbientSoundUtil.randomFloat(-0.5,0.5),
-            z = self.position.z + point.z
-        }
-    end
-end
-
-------------------------------------------------------------------------------
--- Перемещение к цели
-------------------------------------------------------------------------------
-function AmbientSound:moveToTarget(dt)
-	if self.targetPosition == nil then
-		return
-	end
-	local speed = self.config.moveSpeed
-	if speed <= 0 then
-		return
-	end
-	local factor = speed*dt/1000
-	self.position.x = self.position.x + (self.targetPosition.x - self.position.x)*factor
-	self.position.y = self.position.y + (self.targetPosition.y - self.position.y)*factor
-	self.position.z = self.position.z + (self.targetPosition.z - self.position.z)*factor
-	self:updatePosition()
-end
-
-------------------------------------------------------------------------------
--- Остановка
+-- Остановка воспроизведения
 ------------------------------------------------------------------------------
 function AmbientSound:stop()
-	if self.source ~= nil then
-		stopSample(self.source)
+	if not self.playing then
+		return
 	end
-	self.isPlaying = false
-	self.isFinished = true
-	AmbientSoundUtil.debug("Завершён звук ID=%d", self.config.id)
+
+	if self.sample ~= nil then
+		stopSample(self.sample)
+	end
+
+	self.playing = false
+	AmbientSoundUtil.debug("Runtime #%d остановлен.", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
--- Удаление
+-- Обновление
+------------------------------------------------------------------------------
+
+function AmbientSound:update(dt)
+	if not self.loaded then
+		return false
+	end
+
+	if self.playing then
+		-- Проверяем окончание воспроизведения
+		if not isSamplePlaying(self.sample) then
+			self.finished = true
+			self.playing = false
+			return false
+		end
+	end
+
+	-- Движение источника
+	if self.moveInterval > 0 then
+		self:updateMovement(dt)
+	end
+	return true
+end
+
+------------------------------------------------------------------------------
+-- Обновление движения
+------------------------------------------------------------------------------
+function AmbientSound:updateMovement(dt)
+	self.moveTimer = self.moveTimer + dt
+	if self.moveTimer < self.moveInterval * 1000 then
+		return
+	end
+	self.moveTimer = 0
+
+	-- Получаем новую цель движения
+	self.targetPosition = AmbientSoundUtil.randomPointInRadius(self.position.x, self.position.y, self.position.z, self.config.distancePlayer or 1.5)
+
+	-- Перемещаемся
+	local x, y, z = AmbientSoundUtil.moveTowards(self.position.x, self.position.y, self.position.z, self.targetPosition.x, self.targetPosition.y, self.targetPosition.z, self.moveSpeed)
+
+	self.position.x = x
+	self.position.y = y
+	self.position.z = z
+
+	setTranslation(self.sampleNode, x, y, z)
+end
+
+------------------------------------------------------------------------------
+-- Проверка движения
+------------------------------------------------------------------------------
+function AmbientSound:isMoving()
+	return self.moveInterval > 0
+end
+
+------------------------------------------------------------------------------
+-- Проверка завершения воспроизведения
+------------------------------------------------------------------------------
+function AmbientSound:isFinished()
+	return self.finished
+end
+
+------------------------------------------------------------------------------
+-- Изменение позиции
+------------------------------------------------------------------------------
+function AmbientSound:setWorldPosition(x, y, z)
+	self.position.x = x
+	self.position.y = y
+	self.position.z = z
+	if self.sampleNode ~= nil then
+		setTranslation(self.sampleNode, x, y, z)
+	end
+end
+
+------------------------------------------------------------------------------
+-- Получение позиции
+------------------------------------------------------------------------------
+function AmbientSound:getWorldPosition()
+	return self.position.x, self.position.y, self.position.z
+end
+
+------------------------------------------------------------------------------
+-- Изменение целевой позиции
+------------------------------------------------------------------------------
+function AmbientSound:setTargetPosition(x, y, z)
+	self.targetPosition.x = x
+	self.targetPosition.y = y
+	self.targetPosition.z = z
+end
+
+------------------------------------------------------------------------------
+-- Освобождение ресурсов
 ------------------------------------------------------------------------------
 function AmbientSound:delete()
-	if self.source ~= nil then
-		delete(self.source)
-		self.source = nil
+	-- Остановка воспроизведения
+	self:stop()
+
+	-- Удаление Sample
+	if self.sample ~= nil then
+		delete(self.sample)
+		self.sample = nil
 	end
-	self.isFinished = true
+
+	-- Удаление TransformGroup
+	if self.sampleNode ~= nil then
+		delete(self.sampleNode)
+		self.sampleNode = nil
+	end
+
+	self.loaded = false
+	self.finished = true
+	AmbientSoundUtil.debug("Runtime #%d удалён.", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
--- Проверка состояния
+-- Отладочная информация
 ------------------------------------------------------------------------------
-function AmbientSound:isActive()
-	return self.isPlaying and not self.isFinished
+function AmbientSound:printDebug()
+	AmbientSoundUtil.debug("Runtime=%d  Config=%d  Loaded=%s  Playing=%s", self.runtimeId, self.config ~= nil and self.config.id or -1, tostring(self.loaded), tostring(self.playing))
 end
-
-------------------------------------------------------------------------------
--- Завершение загрузки
-------------------------------------------------------------------------------
-AmbientSoundUtil.info("Модуль AmbientSound загружен")

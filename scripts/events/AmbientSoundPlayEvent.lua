@@ -1,371 +1,115 @@
--- ЧАСТЬ 1
 ------------------------------------------------------------------------------
 -- AmbientSoundPlayEvent.lua
 --
--- Сетевое событие запуска глобального звука.
+-- Сервер -> Клиенты
 --
--- Сервер сообщает клиентам:
---   • какой звук;
---   • где появился;
---   • с какой громкостью.
---
--- Клиенты создают локальный экземпляр AmbientSound.
+-- Создание и запуск глобального окружающего звука.
 ------------------------------------------------------------------------------
-
 AmbientSoundPlayEvent = {}
+local AmbientSoundPlayEvent_mt = Class(AmbientSoundPlayEvent, Event)
 
-
-local AmbientSoundPlayEvent_mt = Class(
-	AmbientSoundPlayEvent,
-	Event
-)
-
-
-
-------------------------------------------------------------------------------
--- Регистрация события
-------------------------------------------------------------------------------
-
-InitEventClass(
-	AmbientSoundPlayEvent,
-	"AmbientSoundPlayEvent"
-)
-
-
+InitEventClass(AmbientSoundPlayEvent, "AmbientSoundPlayEvent")
 
 ------------------------------------------------------------------------------
 -- Создание события
 ------------------------------------------------------------------------------
-
 function AmbientSoundPlayEvent.emptyNew()
-
-	local self = Event.new(
-		AmbientSoundPlayEvent_mt
-	)
-
-
+	local self = Event.new(AmbientSoundPlayEvent_mt)
 	return self
-
 end
-
-
 
 ------------------------------------------------------------------------------
 -- Конструктор
 ------------------------------------------------------------------------------
-
---- Создает событие.
----@param soundId number
----@param position table
----@param volume number
----@param isMoving boolean
-------------------------------------------------------------------------------
-function AmbientSoundPlayEvent.new(
-	soundId,
-	position,
-	volume,
-	isMoving
-)
-
-
-	local self =
-		AmbientSoundPlayEvent.emptyNew()
-
-
-
-	self.soundId = soundId
-
-
-
-	self.position = position
-
-
-
-	self.volume =
-		volume or 1
-
-
-
-	self.isMoving =
-		isMoving == true
-
-
-
+function AmbientSoundPlayEvent.new(runtimeId, configId, position)
+	local self = AmbientSoundPlayEvent.emptyNew()
+	self.runtimeId = runtimeId
+	self.configId = configId
+	self.x = position.x
+	self.y = position.y
+	self.z = position.z
 	return self
-
 end
-
-
 
 ------------------------------------------------------------------------------
 -- Запись в поток
 ------------------------------------------------------------------------------
-
-function AmbientSoundPlayEvent:writeStream(
-	streamId,
-	connection
-)
-
-
-	streamWriteInt32(
-		streamId,
-		self.soundId
-	)
-
-
-	streamWriteFloat32(
-		streamId,
-		self.position.x
-	)
-
-
-	streamWriteFloat32(
-		streamId,
-		self.position.y
-	)
-
-
-	streamWriteFloat32(
-		streamId,
-		self.position.z
-	)
-
-
-	streamWriteFloat32(
-		streamId,
-		self.volume
-	)
-
-
-	streamWriteBool(
-		streamId,
-		self.isMoving
-	)
-
-
+function AmbientSoundPlayEvent:writeStream(streamId, connection)
+	streamWriteUInt16(streamId, self.runtimeId)
+	streamWriteUInt16(streamId, self.configId)
+	streamWriteFloat32(streamId, self.x)
+	streamWriteFloat32(streamId, self.y)
+	streamWriteFloat32(streamId, self.z)
 end
-
-
 
 ------------------------------------------------------------------------------
 -- Чтение из потока
 ------------------------------------------------------------------------------
-
-function AmbientSoundPlayEvent:readStream(
-	streamId,
-	connection
-)
-
-
-	self.soundId =
-		streamReadInt32(
-			streamId
-		)
-
-
-	self.position = {
-
-
-		x =
-			streamReadFloat32(
-				streamId
-			),
-
-
-		y =
-			streamReadFloat32(
-				streamId
-			),
-
-
-		z =
-			streamReadFloat32(
-				streamId
-			)
-
-
-	}
-
-
-
-	self.volume =
-		streamReadFloat32(
-			streamId
-		)
-
-
-
-	self.isMoving =
-		streamReadBool(
-			streamId
-		)
-
-
-
+function AmbientSoundPlayEvent:readStream(streamId, connection)
+	self.runtimeId = streamReadUInt16(streamId)
+	self.configId = streamReadUInt16(streamId)
+	self.x = streamReadFloat32(streamId)
+	self.y = streamReadFloat32(streamId)
+	self.z = streamReadFloat32(streamId)
+	self:run(connection)
 end
 
-
--- ЧАСТЬ 2
 ------------------------------------------------------------------------------
--- Выполнение события
+-- Выполнение на клиенте
 ------------------------------------------------------------------------------
-
-function AmbientSoundPlayEvent:run()
-
-
-	if g_ambientSoundSystem == nil then
-
-
-		AmbientSoundUtil.warning(
-			"AmbientSoundSystem отсутствует при получении события"
-		)
-
-
+function AmbientSoundPlayEvent:run(connection)
+	if AmbientSoundUtil.isServer() then
 		return
-
 	end
-
-
-
-	local config = nil
-
-
-
-	for _, sound in ipairs(
-		g_ambientSoundSystem.sounds
-	) do
-
-
-		if sound.id == self.soundId then
-
-
-			config = sound
-
-
-			break
-
-
-		end
-
-
+	local system = g_ambientSoundSystem
+	if system == nil then
+		return
 	end
-
-
-
+	local config = system:getConfig(self.configId)
 	if config == nil then
-
-
-		AmbientSoundUtil.warning(
-			"Не найден звук ID=%d",
-			self.soundId
-		)
-
-
+		AmbientSoundUtil.warning("PlayEvent: неизвестный configId=%d", self.configId)
 		return
-
 	end
 
-
-
-	--------------------------------------------------------------------------
-	-- Создание звука на клиенте
-	--------------------------------------------------------------------------
-
-	local sound =
-		AmbientSound.new(
-			config,
-			self.position
-		)
-
-
-
-	if sound:load() then
-
-
-
-		sound:play()
-
-
-
-		table.insert(
-			g_ambientSoundSystem.activeSounds,
-			sound
-		)
-
-
-
-		AmbientSoundUtil.debug(
-			"Получено сетевое событие звука ID=%d",
-			self.soundId
-		)
-
-
+	local runtime = AmbientSound.new()
+	runtime.runtimeId = self.runtimeId
+	runtime:setConfig(config)
+	runtime:setPosition({x = self.x, y = self.y, z = self.z})
+	if not runtime:load() then
+		return
 	end
 
-
+	runtime:play()
+	system.activeSounds[self.runtimeId] = runtime
+	AmbientSoundUtil.debug("Получен Runtime #%d", self.runtimeId)
 end
 
-
-
 ------------------------------------------------------------------------------
--- Отправка события всем клиентам
+-- Отправка события
 ------------------------------------------------------------------------------
-
---- Вызывается сервером.
----@param sound table
----@param position table
-------------------------------------------------------------------------------
-function AmbientSoundPlayEvent.sendEvent(
-	sound,
-	position
-)
-
-
-	if g_server == nil then
-
-
+function AmbientSoundPlayEvent.sendEvent(runtimeId, configId, position)
+	if not AmbientSoundUtil.isServer() then
 		return
-
 	end
-
-
-
-	local event =
-		AmbientSoundPlayEvent.new(
-
-			sound.id,
-
-			position,
-
-			sound.volume,
-
-			sound.mode ~= "static"
-
-		)
-
-
-
-	g_server:broadcastEvent(
-		event,
-		false
-	)
-
-
-
-	AmbientSoundUtil.debug(
-		"Отправлено глобальное событие звука ID=%d",
-		sound.id
-	)
-
-
+	g_server:broadcastEvent(AmbientSoundPlayEvent.new(runtimeId, configId, position), nil, nil)
 end
 
-
+------------------------------------------------------------------------------
+-- Проверка данных
+------------------------------------------------------------------------------
+function AmbientSoundPlayEvent:validate()
+	if self.runtimeId == nil then
+		return false
+	end
+	if self.configId == nil then
+		return false
+	end
+	return true
+end
 
 ------------------------------------------------------------------------------
--- Завершение загрузки
+-- Отладочная информация
 ------------------------------------------------------------------------------
-
-AmbientSoundUtil.info(
-	"Модуль AmbientSoundPlayEvent загружен"
-)
+function AmbientSoundPlayEvent:printDebug()
+	AmbientSoundUtil.debug("PlayEvent Runtime=%d Config=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.configId, self.x, self.y, self.z)
+end

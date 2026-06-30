@@ -121,7 +121,8 @@ function AmbientSoundSystem:createRuntimeSound(config)
 		return nil
 	end
 
-	local runtimeSound = AmbientSound.new(config)
+	local runtimeSound = AmbientSound.new()
+	runtimeSound:setConfig(config)
 	runtimeSound.runtimeId = self.nextRuntimeId
 	self.nextRuntimeId = self.nextRuntimeId + 1
 	runtimeSound:setPosition(position)
@@ -152,7 +153,11 @@ function AmbientSoundSystem:updateRuntimeSounds(dt)
 	local removeList = {}
 	for runtimeId, runtimeSound in pairs(self.activeSounds) do
 		-- Обновление экземпляра
-		runtimeSound:update(dt)
+		if runtimeSound:update(dt) == false then
+			table.insert(removeList, runtimeId)
+			goto continue
+		end
+
 		-- Если звук движется, сервер синхронизирует позицию
 		if runtimeSound:isMoving() and runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
 			local position = runtimeSound:getPosition()
@@ -163,6 +168,7 @@ function AmbientSoundSystem:updateRuntimeSounds(dt)
 		if runtimeSound:isFinished() then
 			table.insert(removeList,runtimeId)
 		end
+		::continue::
 	end
 
 	-- Удаляем завершённые экземпляры
@@ -185,9 +191,9 @@ function AmbientSoundSystem:removeRuntimeSound(runtimeId)
 		AmbientSoundStopEvent.sendEvent(runtimeId)
 	end
 
-	runtimeSound:stop()
 	runtimeSound:delete()
 	self.activeSounds[runtimeId] = nil
+	collectgarbage("step")
 	AmbientSoundUtil.debug("Удалён Runtime #%d", runtimeId)
 end
 
@@ -311,6 +317,7 @@ function AmbientSoundSystem:stopAll()
 	for runtimeId, _ in pairs(self.activeSounds) do
 		table.insert(runtimeIds, runtimeId)
 	end
+	table.sort(runtimeIds)
 	for _, runtimeId in ipairs(runtimeIds) do
 		self:removeRuntimeSound(runtimeId)
 	end
@@ -367,6 +374,7 @@ function AmbientSoundSystem:delete()
 	end
 
 	AmbientSoundUtil.info("Ambient Sound System остановлена.")
+	self.enabled = false
 end
 
 ------------------------------------------------------------------------------

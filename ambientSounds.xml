@@ -1,0 +1,142 @@
+ <?xml version="1.0" encoding="utf-8"?>
+
+<ambientSounds>
+	<!-- =============================================================== -->
+	<!-- Файлы звуков -->
+	<!-- =============================================================== -->
+
+	<soundFiles>
+
+		<soundFile	id="1"	filename="$mapDir$/sounds/woodpecker01.ogg"/>
+		<soundFile	id="2"	filename="$mapDir$/sounds/woodpecker02.ogg"/>
+		<soundFile	id="3"	filename="$mapDir$/sounds/owl01.ogg"/>
+		<soundFile	id="4"	filename="$mapDir$/sounds/owl02.ogg"/>
+		<soundFile	id="5"	filename="$mapDir$/sounds/cuckoo01.ogg"/>
+		<soundFile	id="6"	filename="$mapDir$/sounds/cuckoo02.ogg"/>
+		<soundFile	id="7"	filename="$mapDir$/sounds/bear01.ogg"/>
+		<soundFile	id="8"	filename="$mapDir$/sounds/bear02.ogg"/>
+		<soundFile	id="9"	filename="$mapDir$/sounds/fly01.ogg"/>
+		<soundFile	id="10"	filename="$mapDir$/sounds/fly02.ogg"/>
+		<soundFile	id="11"	filename="$mapDir$/sounds/mosquito01.ogg"/>
+		<soundFile	id="12"	filename="$mapDir$/sounds/mosquito02.ogg"/>
+	</soundFiles>
+
+	<!-- =============================================================== -->
+	<!-- Описание звуков -->
+	<!-- =============================================================== -->
+
+	<sounds>
+		<!-- Дятел -->
+		<sound
+			soundFiles="1,2"
+			type="global"
+			mode="static"
+			translation="-1151 82 -1114"
+			randomRadius="40"
+			range="220"
+			innerRange="5"
+			volume="1"
+			startHour="9"
+			endHour="20"
+			minDelay="1500"
+			maxDelay="2400"
+			weather="SUN CLOUDY RAIN"
+			seasons="WINTER SPRING SUMMER AUTUMN"
+		/>
+
+		<!-- Филин -->
+		<sound
+			soundFiles="3,4"
+			type="global"
+			mode="static"
+			translation="1000 75 900"
+			randomRadius="50"
+			range="220"
+			innerRange="5"
+			volume="1"
+			startHour="23"
+			endHour="7"
+			minDelay="900"
+			maxDelay="1800"
+			weather="SUN CLOUDY RAIN"
+			seasons="WINTER SPRING SUMMER AUTUMN"
+		/>
+
+		<!-- Кукушка -->
+		<sound
+			soundFiles="5,6"
+			type="global"
+			mode="static"
+			translation="-400 76 850"
+			randomRadius="120"
+			range="220"
+			innerRange="5"
+			volume="1"
+			startHour="5"
+			endHour="10"
+			minDelay="900"
+			maxDelay="1800"
+			weather="SUN CLOUDY"
+			seasons="SPRING SUMMER"
+		/>
+
+		<!-- Медведь -->
+		<sound
+			soundFiles="7,8"
+			type="global"
+			mode="running"
+			distancePlayer="120"
+			range="250"
+			innerRange="5"
+			volume="1"
+			moveInterval="0.20"
+			moveSpeed="1.2"
+			startHour="0"
+			endHour="24"
+			minDelay="172800"
+			maxDelay="259200"
+			weather="SUN CLOUDY RAIN"
+			seasons="WINTER SPRING SUMMER AUTUMN"
+		/>
+
+		<!-- Муха -->
+		<sound
+			soundFiles="9,10"
+			type="local"
+			mode="fly"
+			distancePlayer="1.2"
+			range="2"
+			innerRange="0.15"
+			volume="0.9"
+			moveInterval="0.15"
+			moveSpeed="0.60"
+			heightOffset="1.65"
+			startHour="8"
+			endHour="20"
+			minDelay="900"
+			maxDelay="1800"
+			weather="SUN CLOUDY"
+			seasons="SPRING SUMMER AUTUMN"
+		/>
+
+		<!-- Комар -->
+		<sound
+			soundFiles="11,12"
+			type="local"
+			mode="fly"
+			distancePlayer="1.0"
+			range="2"
+			innerRange="0.10"
+			volume="0.8"
+			moveInterval="0.10"
+			moveSpeed="0.45"
+			heightOffset="1.70"
+			startHour="19"
+			endHour="22"
+			minDelay="900"
+			maxDelay="1800"
+			weather="SUN CLOUDY"
+			seasons="SUMMER"
+		/>
+	</sounds>
+</ambientSounds>

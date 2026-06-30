@@ -152,26 +152,29 @@ end
 function AmbientSoundSystem:updateRuntimeSounds(dt)
 	local removeList = {}
 	for runtimeId, runtimeSound in pairs(self.activeSounds) do
-		-- Обновление экземпляра
-		if runtimeSound:update(dt) == false then
+		local alive = runtimeSound:update(dt)
+		if alive then
+			-- Если звук движется, сервер синхронизирует позицию
+			if runtimeSound:isMoving()
+				and runtimeSound.config.type == "global"
+				and AmbientSoundUtil.isServer() then
+				local position = runtimeSound:getPosition()
+				AmbientSoundMoveEvent.sendEvent(
+					runtimeId,
+					position.x,
+					position.y,
+					position.z
+				)
+			end
+
+			-- Закончил воспроизведение
+			if runtimeSound:isFinished() then
+				table.insert(removeList, runtimeId)
+			end
+		else
 			table.insert(removeList, runtimeId)
-			goto continue
 		end
-
-		-- Если звук движется, сервер синхронизирует позицию
-		if runtimeSound:isMoving() and runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
-			local position = runtimeSound:getPosition()
-			AmbientSoundMoveEvent.sendEvent(runtimeId, position.x, position.y, position.z)
-		end
-
-		-- Закончил воспроизведение
-		if runtimeSound:isFinished() then
-			table.insert(removeList,runtimeId)
-		end
-		::continue::
 	end
-
-	-- Удаляем завершённые экземпляры
 	for _, runtimeId in ipairs(removeList) do
 		self:removeRuntimeSound(runtimeId)
 	end

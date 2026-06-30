@@ -1,26 +1,15 @@
 ------------------------------------------------------------------------------
 -- AmbientSoundMoveEvent.lua
---
--- Сетевое событие перемещения глобального звука.
---
--- Используется для:
---   • running
---   • fly
---
--- Сервер отправляет новую позицию.
--- Клиенты обновляют источник.
+-- Сервер -> Клиенты
+-- Синхронизация положения движущегося глобального источника звука.
 ------------------------------------------------------------------------------
 AmbientSoundMoveEvent = {}
-
 local AmbientSoundMoveEvent_mt = Class(AmbientSoundMoveEvent, Event)
 
-------------------------------------------------------------------------------
--- Регистрация
-------------------------------------------------------------------------------
 InitEventClass(AmbientSoundMoveEvent, "AmbientSoundMoveEvent")
 
 ------------------------------------------------------------------------------
--- Создание
+-- Создание пустого события
 ------------------------------------------------------------------------------
 function AmbientSoundMoveEvent.emptyNew()
 	local self = Event.new(AmbientSoundMoveEvent_mt)
@@ -30,81 +19,78 @@ end
 ------------------------------------------------------------------------------
 -- Конструктор
 ------------------------------------------------------------------------------
-
----@param soundId number
----@param position table
-------------------------------------------------------------------------------
-function AmbientSoundMoveEvent.new(soundId, position)
+function AmbientSoundMoveEvent.new(runtimeId, x, y, z)
 	local self = AmbientSoundMoveEvent.emptyNew()
-	self.soundId = soundId
-	self.position = {
-		x = position.x,
-		y = position.y,
-		z = position.z
-	}
+	self.runtimeId = runtimeId
+	self.x = x
+	self.y = y
+	self.z = z
 	return self
 end
 
 ------------------------------------------------------------------------------
--- Запись
+-- Запись в поток
 ------------------------------------------------------------------------------
 function AmbientSoundMoveEvent:writeStream(streamId, connection)
-	streamWriteInt32(streamId, self.soundId)
-	streamWriteFloat32(streamId, self.position.x)
-	streamWriteFloat32(streamId, self.position.y)
-	streamWriteFloat32(streamId,self.position.z)
+	streamWriteUInt16(streamId, self.runtimeId)
+	streamWriteFloat32(streamId, self.x)
+	streamWriteFloat32(streamId, self.y)
+	streamWriteFloat32(streamId, self.z)
 end
 
 ------------------------------------------------------------------------------
--- Чтение
+-- Чтение из потока
 ------------------------------------------------------------------------------
-function AmbientSoundMoveEvent:readStream(streamId,connection)
-	self.soundId = streamReadInt32(streamId)
-	self.position = {
-		x = streamReadFloat32(streamId),
-		y = streamReadFloat32(streamId),
-		z = streamReadFloat32(streamId)
-	}
+function AmbientSoundMoveEvent:readStream(streamId, connection)
+	self.runtimeId = streamReadUInt16(streamId)
+	self.x = streamReadFloat32(streamId)
+	self.y = streamReadFloat32(streamId)
+	self.z = streamReadFloat32(streamId)
+	self:run(connection)
 end
 
-
 ------------------------------------------------------------------------------
--- Выполнение события
+-- Выполнение на клиенте
 ------------------------------------------------------------------------------
-function AmbientSoundMoveEvent:run()
-	if g_ambientSoundSystem == nil then
-		AmbientSoundUtil.warning("AmbientSoundSystem отсутствует при перемещении")
+function AmbientSoundMoveEvent:run(connection)
+	if AmbientSoundUtil.isServer() then
 		return
 	end
-	for _, sound in ipairs(g_ambientSoundSystem.activeSounds) do
-		if sound.config.id == self.soundId then
-			sound.position.x = self.position.x
-			sound.position.y = self.position.y
-			sound.position.z = self.position.z
-			sound:updatePosition()
-			AmbientSoundUtil.debug("Перемещён звук ID=%d", self.soundId)
-			break
-		end
-	end
-end
-
-------------------------------------------------------------------------------
--- Отправка события перемещения
-------------------------------------------------------------------------------
-
---- Отправляется сервером.
----@param sound table
----@param position table
-------------------------------------------------------------------------------
-function AmbientSoundMoveEvent.sendEvent(sound, position)
-	if g_server == nil then
+	local system = g_ambientSoundSystem
+	if system == nil then
 		return
 	end
-	local event = AmbientSoundMoveEvent.new(sound.config.id, position)
-	g_server:broadcastEvent(event, false)
+	local runtime = system:getRuntimeSound(self.runtimeId)
+	if runtime == nil then
+		AmbientSoundUtil.warning("MoveEvent: Runtime #%d не найден.", self.runtimeId)
+		return
+	end
+	runtime:setWorldPosition(self.x, self.y, self.z)
 end
 
 ------------------------------------------------------------------------------
--- Завершение загрузки
+-- Отправка события
 ------------------------------------------------------------------------------
-AmbientSoundUtil.info("Модуль AmbientSoundMoveEvent загружен")
+function AmbientSoundMoveEvent.sendEvent(runtimeId, x, y, z)
+	if not AmbientSoundUtil.isServer() then
+		return
+	end
+	g_server:broadcastEvent(AmbientSoundMoveEvent.new(runtimeId, x, y, z), nil, nil)
+end
+
+------------------------------------------------------------------------------
+-- Проверка данных
+------------------------------------------------------------------------------
+function AmbientSoundMoveEvent:validate()
+	if self.runtimeId == nil then
+		return false
+	end
+	return true
+end
+
+------------------------------------------------------------------------------
+-- Отладочная информация
+------------------------------------------------------------------------------
+function AmbientSoundMoveEvent:printDebug()
+	AmbientSoundUtil.debug("MoveEvent Runtime=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.x, self.y, self.z)
+end

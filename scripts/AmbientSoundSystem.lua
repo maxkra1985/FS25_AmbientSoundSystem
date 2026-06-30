@@ -38,7 +38,7 @@ function AmbientSoundSystem.new(customMt)
 	self.initialized = false
 
 	-- XML
-	self.xmlFilename = "ambientSounds.xml"
+	self.xmlFilename = nil
 	return self
 end
 
@@ -55,7 +55,7 @@ function AmbientSoundSystem:initialize(xmlFilename)
 	end
 
 	AmbientSoundUtil.info("----------------------------------------")
-	AmbientSoundUtil.info("Инициализация Ambient Sound System")
+	AmbientSoundUtil.info("Инициализация Ambient Sound System из %s'",tostring(self.xmlFilename))
 	AmbientSoundUtil.info("----------------------------------------")
 
 	-- Загрузка XML
@@ -72,10 +72,12 @@ function AmbientSoundSystem:initialize(xmlFilename)
 	for _, config in ipairs(self.configs) do
 		self.configsById[config.id] = config
 	end
+	AmbientSoundUtil.info("Загружено файлов: %d", #self.soundFiles)
 	AmbientSoundUtil.info("Загружено конфигураций: %d", #self.configs)
 
 	-- Создание Scheduler
 	self.scheduler = AmbientSoundScheduler.new(self.configs)
+	AmbientSoundUtil.info("Scheduler создан")
 	if self.scheduler ~= nil then
 		self.scheduler:reset()
 	end

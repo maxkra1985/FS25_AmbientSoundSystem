@@ -18,9 +18,17 @@ function AmbientSoundMission.loadMissionFinished(mission)
 	if g_ambientSoundSystem ~= nil then
 		return
 	end
+	Logging.info("[AmbientSoundMission] mission=%s", tostring(mission))
+	Logging.info("[AmbientSoundMission] mission.baseDirectory=%s", tostring(mission.baseDirectory))
+	Logging.info("[AmbientSoundMission] mission.missionInfo=%s", tostring(mission.missionInfo))
+	if mission.missionInfo ~= nil then
+		Logging.info("[AmbientSoundMission] mission.missionInfo.baseDirectory=%s", tostring(mission.missionInfo.baseDirectory))
+	end
+	Logging.info("[AmbientSoundMission] g_currentModDirectory=%s", tostring(g_currentModDirectory))
 	AmbientSoundUtil.info("Инициализация Ambient Sound System...")
 	g_ambientSoundSystem = AmbientSoundSystem.new()
-	local xmlFilename = Utils.getFilename("ambientSounds.xml", g_currentModDirectory)
+	local xmlFilename = Utils.getFilename("scripts/AmbientSoundSystem/ambientSounds.xml",mission.baseDirectory)
+	Logging.info("[AmbientSoundMission] xmlFilename='%s'", xmlFilename)
 	local success = g_ambientSoundSystem:initialize(xmlFilename)
 	if success then
 		AmbientSoundUtil.info("Ambient Sound System успешно запущена.")

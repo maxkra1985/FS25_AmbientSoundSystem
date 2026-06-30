@@ -13,6 +13,7 @@ local AmbientSoundScheduler_mt = Class(AmbientSoundScheduler)
 function AmbientSoundScheduler.new(configs, customMt)
 	local self = setmetatable({}, customMt or AmbientSoundScheduler_mt)
 	self.configs = configs or {}
+	AmbientSoundUtil.info("[AmbientSoundScheduler.new] self.configs: %s", tostring(self.configs))
 	self.timers = {}
 	self.readyConfigs = {}
 	return self
@@ -27,6 +28,7 @@ function AmbientSoundScheduler:reset()
 	for _, config in ipairs(self.configs) do
 		self.timers[config.id] = math.random(config.minDelay, config.maxDelay)
 	end
+	AmbientSoundUtil.info("[AmbientSoundScheduler.reset] self.timers: %s", tostring(self.timers))
 end
 
 ------------------------------------------------------------------------------
@@ -50,6 +52,9 @@ function AmbientSoundScheduler:update(dt)
 			end
 		end
 	end
+	AmbientSoundUtil.info("[AmbientSoundScheduler.update] self.configs: %s", tostring(self.configs))
+	AmbientSoundUtil.info("[AmbientSoundScheduler.update] self.readyConfigs: %s", tostring(self.readyConfigs))
+	AmbientSoundUtil.info("[AmbientSoundScheduler.update] self.timers: %s", tostring(self.timers))
 	return self.readyConfigs
 end
 
@@ -67,10 +72,7 @@ function AmbientSoundScheduler:restartTimer(configId)
 	if config == nil then
 		return false
 	end
-	self.timers[configId] = math.random(
-		config.minDelay,
-		config.maxDelay
-	)
+	self.timers[configId] = math.random(config.minDelay, config.maxDelay)
 	return true
 end
 

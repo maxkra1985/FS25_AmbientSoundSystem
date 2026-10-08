@@ -11,7 +11,7 @@
 --   • обновление состояния.
 --
 -- Вопросами Scheduler, XML и Multiplayer занимается
--- AmbientSoundSystem.
+-- TaigaAmbientSoundSystem.
 ------------------------------------------------------------------------------
 AmbientSound = {}
 local AmbientSound_mt = Class(AmbientSound)
@@ -78,28 +78,25 @@ function AmbientSound:getPosition()
 end
 
 ------------------------------------------------------------------------------
--- Загрузка
+-- Загрузка 3D-звука: Sample принадлежит AudioSource и движется вместе с ним.
 ------------------------------------------------------------------------------
 function AmbientSound:load()
-	if self.loaded then
-		return true
-	end
+    if self.loaded then
+        return true
+    end
 
-	-- Создание transform node
-	self.sampleNode = createTransformGroup("AmbientSound")
-	link(getRootNode(), self.sampleNode)
-	setTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
+    self.sample, self.sampleNode = TaigaAmbientSoundUtil.createSample(self.config)
+    if self.sample == nil or self.sampleNode == nil then
+        TaigaAmbientSoundUtil.warning("Не удалось создать пространственный звук Runtime #%d", self.runtimeId)
+        return false
+    end
 
-	-- Создание Sample
-	self.sample = AmbientSoundUtil.createSample(self.config)
-	if self.sample == nil then
-		AmbientSoundUtil.warning( "Не удалось создать Sample.")
-		return false
-	end
+    link(getRootNode(), self.sampleNode)
+    setWorldTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
 
-	self.loaded = true
-	AmbientSoundUtil.debug("Runtime #%d загружен.", self.runtimeId)
-	return true
+    self.loaded = true
+    TaigaAmbientSoundUtil.debug("Runtime #%d загружен.", self.runtimeId)
+    return true
 end
 
 ------------------------------------------------------------------------------
@@ -117,10 +114,10 @@ function AmbientSound:play()
 	end
 
 	setTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
-	playSample(self.sample)
+	playSample(self.sample, 1, 1, 0)
 	self.playing = true
 	self.finished = false
-	AmbientSoundUtil.debug("Runtime #%d запущен.", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("Runtime #%d запущен.", self.runtimeId)
 	return true
 end
 
@@ -137,7 +134,7 @@ function AmbientSound:stop()
 	end
 
 	self.playing = false
-	AmbientSoundUtil.debug("Runtime #%d остановлен.", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("Runtime #%d остановлен.", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
@@ -176,10 +173,10 @@ function AmbientSound:updateMovement(dt)
 	self.moveTimer = 0
 
 	-- Получаем новую цель движения
-	self.targetPosition = AmbientSoundUtil.randomPointInRadius(self.position.x, self.position.y, self.position.z, self.config.distancePlayer or 1.5)
+	self.targetPosition = TaigaAmbientSoundUtil.randomPointInRadius(self.position.x, self.position.y, self.position.z, self.config.distancePlayer or 1.5)
 
 	-- Перемещаемся
-	local x, y, z = AmbientSoundUtil.moveTowards(self.position.x, self.position.y, self.position.z, self.targetPosition.x, self.targetPosition.y, self.targetPosition.z, self.moveSpeed)
+	local x, y, z = TaigaAmbientSoundUtil.moveTowards(self.position.x, self.position.y, self.position.z, self.targetPosition.x, self.targetPosition.y, self.targetPosition.z, self.moveSpeed)
 
 	self.position.x = x
 	self.position.y = y
@@ -237,26 +234,21 @@ function AmbientSound:delete()
 	-- Остановка воспроизведения
 	self:stop()
 
-	-- Удаление Sample
-	if self.sample ~= nil then
-		delete(self.sample)
-		self.sample = nil
-	end
-
-	-- Удаление TransformGroup
-	if self.sampleNode ~= nil then
-		delete(self.sampleNode)
-		self.sampleNode = nil
-	end
+    -- Sample создан внутри AudioSource, отдельно удалять его нельзя.
+    if self.sampleNode ~= nil then
+        delete(self.sampleNode)
+        self.sampleNode = nil
+    end
+    self.sample = nil
 
 	self.loaded = false
 	self.finished = true
-	AmbientSoundUtil.debug("Runtime #%d удалён.", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("Runtime #%d удалён.", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
 -- Отладочная информация
 ------------------------------------------------------------------------------
 function AmbientSound:printDebug()
-	AmbientSoundUtil.debug("Runtime=%d  Config=%d  Loaded=%s  Playing=%s", self.runtimeId, self.config ~= nil and self.config.id or -1, tostring(self.loaded), tostring(self.playing))
+	TaigaAmbientSoundUtil.debug("Runtime=%d  Config=%d  Loaded=%s  Playing=%s", self.runtimeId, self.config ~= nil and self.config.id or -1, tostring(self.loaded), tostring(self.playing))
 end

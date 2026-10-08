@@ -58,7 +58,7 @@ end
 -- Выполнение на клиенте
 ------------------------------------------------------------------------------
 function AmbientSoundPlayEvent:run(connection)
-	if AmbientSoundUtil.isServer() then
+	if TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	local system = g_ambientSoundSystem
@@ -67,7 +67,7 @@ function AmbientSoundPlayEvent:run(connection)
 	end
 	local config = system:getConfig(self.configId)
 	if config == nil then
-		AmbientSoundUtil.warning("PlayEvent: неизвестный configId=%d", self.configId)
+		TaigaAmbientSoundUtil.warning("PlayEvent: неизвестный configId=%d", self.configId)
 		return
 	end
 
@@ -81,14 +81,14 @@ function AmbientSoundPlayEvent:run(connection)
 
 	runtime:play()
 	system.activeSounds[self.runtimeId] = runtime
-	AmbientSoundUtil.debug("Получен Runtime #%d", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("Получен Runtime #%d", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
 -- Отправка события
 ------------------------------------------------------------------------------
 function AmbientSoundPlayEvent.sendEvent(runtimeId, configId, position)
-	if not AmbientSoundUtil.isServer() then
+	if not TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	g_server:broadcastEvent(AmbientSoundPlayEvent.new(runtimeId, configId, position), nil, nil)
@@ -111,5 +111,5 @@ end
 -- Отладочная информация
 ------------------------------------------------------------------------------
 function AmbientSoundPlayEvent:printDebug()
-	AmbientSoundUtil.debug("PlayEvent Runtime=%d Config=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.configId, self.x, self.y, self.z)
+	TaigaAmbientSoundUtil.debug("PlayEvent Runtime=%d Config=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.configId, self.x, self.y, self.z)
 end

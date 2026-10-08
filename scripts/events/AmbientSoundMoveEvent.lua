@@ -53,7 +53,7 @@ end
 -- Выполнение на клиенте
 ------------------------------------------------------------------------------
 function AmbientSoundMoveEvent:run(connection)
-	if AmbientSoundUtil.isServer() then
+	if TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	local system = g_ambientSoundSystem
@@ -62,7 +62,7 @@ function AmbientSoundMoveEvent:run(connection)
 	end
 	local runtime = system:getRuntimeSound(self.runtimeId)
 	if runtime == nil then
-		AmbientSoundUtil.warning("MoveEvent: Runtime #%d не найден.", self.runtimeId)
+		TaigaAmbientSoundUtil.warning("MoveEvent: Runtime #%d не найден.", self.runtimeId)
 		return
 	end
 	runtime:setWorldPosition(self.x, self.y, self.z)
@@ -72,7 +72,7 @@ end
 -- Отправка события
 ------------------------------------------------------------------------------
 function AmbientSoundMoveEvent.sendEvent(runtimeId, x, y, z)
-	if not AmbientSoundUtil.isServer() then
+	if not TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	g_server:broadcastEvent(AmbientSoundMoveEvent.new(runtimeId, x, y, z), nil, nil)
@@ -92,5 +92,5 @@ end
 -- Отладочная информация
 ------------------------------------------------------------------------------
 function AmbientSoundMoveEvent:printDebug()
-	AmbientSoundUtil.debug("MoveEvent Runtime=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.x, self.y, self.z)
+	TaigaAmbientSoundUtil.debug("MoveEvent Runtime=%d Pos=(%.2f %.2f %.2f)", self.runtimeId, self.x, self.y, self.z)
 end

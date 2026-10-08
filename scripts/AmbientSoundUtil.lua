@@ -3,39 +3,39 @@
 --
 -- Общие вспомогательные функции.
 ------------------------------------------------------------------------------
-AmbientSoundUtil = {}
+TaigaAmbientSoundUtil = {}
 
 ------------------------------------------------------------------------------
 -- Настройки
 ------------------------------------------------------------------------------
-AmbientSoundUtil.DEBUG = true
+TaigaAmbientSoundUtil.DEBUG = true
 
 ------------------------------------------------------------------------------
 -- Информация
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.info(text, ...)
+function TaigaAmbientSoundUtil.info(text, ...)
 	Logging.info("[AmbientSound] " ..string.format(text, ...))
 end
 
 ------------------------------------------------------------------------------
 -- Предупреждение
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.warning(text, ...)
+function TaigaAmbientSoundUtil.warning(text, ...)
 	Logging.warning("[AmbientSound] " ..string.format(text, ...))
 end
 
 ------------------------------------------------------------------------------
 -- Ошибка
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.error(text, ...)
+function TaigaAmbientSoundUtil.error(text, ...)
 	Logging.error("[AmbientSound] " ..string.format(text, ...))
 end
 
 ------------------------------------------------------------------------------
 -- Отладка
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.debug(text, ...)
-	if not AmbientSoundUtil.DEBUG then
+function TaigaAmbientSoundUtil.debug(text, ...)
+	if not TaigaAmbientSoundUtil.DEBUG then
 		return
 	end
 	Logging.info("[AmbientSound][DEBUG] " ..string.format(text, ...))
@@ -45,56 +45,60 @@ end
 ------------------------------------------------------------------------------
 -- Проверка режима
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.isServer()
+function TaigaAmbientSoundUtil.isServer()
 	return g_server ~= nil
 end
 
 ------------------------------------------------------------------------------
 -- Проверка клиента
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.isClient()
+function TaigaAmbientSoundUtil.isClient()
 	return g_client ~= nil
 end
 
 ------------------------------------------------------------------------------
--- Создание Sample
+-- Создание пространственного AudioSource.
+-- Возвращает Sample и узел источника: удалять необходимо только AudioSource.
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.createSample(config)
-	if config == nil then
-		return nil
-	end
-	if config.soundFiles == nil then
-		return nil
-	end
-	if #config.soundFiles == 0 then
-		return nil
-	end
+function TaigaAmbientSoundUtil.createSample(config)
+    if config == nil or config.soundFiles == nil or #config.soundFiles == 0 then
+        return nil, nil
+    end
 
-	-- Случайный файл
-	local filename = config.soundFiles[math.random(#config.soundFiles)]
-	if filename == nil then
-		return nil
-	end
+    -- Случайный вариант выбирается из уже разрешённых при загрузке XML путей.
+    local filename = config.soundFiles[math.random(#config.soundFiles)]
+    local soundNode = createAudioSource(
+        "TaigaAmbientSound",
+        filename,
+        config.range,
+        config.innerRange,
+        config.volume,
+        1
+    )
+    if soundNode == nil or soundNode == 0 then
+        TaigaAmbientSoundUtil.warning("Не удалось создать AudioSource для '%s'", tostring(filename))
+        return nil, nil
+    end
 
-	-- Создание Sample
-	local sample = createSample("AmbientSound")
-	if sample == nil then
-		AmbientSoundUtil.warning("Не удалось создать Sample.")
-		return nil
-	end
+    local sample = getAudioSourceSample(soundNode)
+    if sample == nil or sample == 0 then
+        TaigaAmbientSoundUtil.warning("AudioSource не содержит Sample: '%s'", tostring(filename))
+        delete(soundNode)
+        return nil, nil
+    end
 
-	loadSample(sample, filename, false)
-	setSampleVolume(sample, config.volume)
-	setSampleInnerRange(sample, config.innerRange)
-	setSampleOuterRange(sample, config.range)
-	return sample
+    setAudioSourceAutoPlay(soundNode, false)
+    if AudioGroup ~= nil and AudioGroup.ENVIRONMENT ~= nil then
+        setSampleGroup(sample, AudioGroup.ENVIRONMENT)
+    end
+    return sample, soundNode
 end
 
 ------------------------------------------------------------------------------
 -- Получение позиции игрока
 ------------------------------------------------------------------------------
 
-function AmbientSoundUtil.getPlayerWorldPosition(player)
+function TaigaAmbientSoundUtil.getPlayerWorldPosition(player)
 	if player == nil then
 		return 0, 0, 0
 	end
@@ -113,14 +117,14 @@ end
 ------------------------------------------------------------------------------
 -- Проверка условий воспроизведения
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.checkConditions(config)
-	if not AmbientSoundUtil.checkHour(config) then
+function TaigaAmbientSoundUtil.checkConditions(config)
+	if not TaigaAmbientSoundUtil.checkHour(config) then
 		return false
 	end
-	if not AmbientSoundUtil.checkSeason(config) then
+	if not TaigaAmbientSoundUtil.checkSeason(config) then
 		return false
 	end
-	if not AmbientSoundUtil.checkWeather(config) then
+	if not TaigaAmbientSoundUtil.checkWeather(config) then
 		return false
 	end
 	return true
@@ -129,7 +133,7 @@ end
 ------------------------------------------------------------------------------
 -- Проверка времени суток
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.checkHour(config)
+function TaigaAmbientSoundUtil.checkHour(config)
 	if g_currentMission == nil then
 		return true
 	end
@@ -153,14 +157,14 @@ end
 ------------------------------------------------------------------------------
 -- Проверка сезона
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.checkSeason(config)
+function TaigaAmbientSoundUtil.checkSeason(config)
 	if config.seasons == nil then
 		return true
 	end
 	if #config.seasons == 0 then
 		return true
 	end
-	local season = AmbientSoundUtil.getCurrentSeason()
+	local season = TaigaAmbientSoundUtil.getCurrentSeason()
 	if season == nil then
 		return true
 	end
@@ -177,7 +181,7 @@ end
 ------------------------------------------------------------------------------
 -- Проверка погоды
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.checkWeather(config)
+function TaigaAmbientSoundUtil.checkWeather(config)
 	if config.weather == nil then
 		return true
 	end
@@ -185,7 +189,7 @@ function AmbientSoundUtil.checkWeather(config)
 		return true
 	end
 	local weather =
-		AmbientSoundUtil.getCurrentWeather()
+		TaigaAmbientSoundUtil.getCurrentWeather()
 	if weather == nil then
 		return true
 	end
@@ -199,49 +203,66 @@ function AmbientSoundUtil.checkWeather(config)
 end
 
 ------------------------------------------------------------------------------
--- Получение текущего сезона
+-- Текущий игровой сезон в строковом формате XML (SPRING, SUMMER и т.д.).
+-- GIANTS хранит environment.currentSeason как значение перечисления Season.
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.getCurrentSeason()
-	if g_currentMission == nil then
-		return nil
-	end
-	local environment = g_currentMission.environment
-	if environment == nil then
-		return nil
-	end
-	if environment.currentSeason ~= nil then
-		return tostring(environment.currentSeason)
-	end
-	if environment.season ~= nil then
-		return tostring(environment.season)
-	end
-	return nil
+function TaigaAmbientSoundUtil.getCurrentSeason()
+    local environment = g_currentMission ~= nil and g_currentMission.environment or nil
+    if environment == nil then
+        return nil
+    end
+
+    local season = environment.currentSeason
+    if season == Season.SPRING then
+        return "SPRING"
+    elseif season == Season.SUMMER then
+        return "SUMMER"
+    elseif season == Season.AUTUMN then
+        return "AUTUMN"
+    elseif season == Season.WINTER then
+        return "WINTER"
+    end
+    return nil
 end
 
 ------------------------------------------------------------------------------
--- Получение текущей погоды
+-- Текущая погода в строковом формате XML.
+-- Частичную облачность относим к CLOUDY для совместимости с настройками карты.
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.getCurrentWeather()
-	if g_currentMission == nil then
-		return nil
-	end
-	local environment = g_currentMission.environment
-	if environment == nil then
-		return nil
-	end
-	if environment.weather ~= nil then
-		return tostring(environment.weather)
-	end
-	if environment.weatherType ~= nil then
-		return tostring(environment.weatherType)
-	end
-	return nil
+function TaigaAmbientSoundUtil.getCurrentWeather()
+    local environment = g_currentMission ~= nil and g_currentMission.environment or nil
+    if environment == nil or environment.weather == nil then
+        return nil
+    end
+
+    local weather = environment.weather
+    if not weather:getIsReady() then
+        return nil
+    end
+
+    local weatherType = weather:getCurrentWeatherType()
+    if weatherType == WeatherType.SUN then
+        return "SUN"
+    elseif weatherType == WeatherType.PARTIALLY_CLOUDY or weatherType == WeatherType.CLOUDY then
+        return "CLOUDY"
+    elseif weatherType == WeatherType.RAIN then
+        return "RAIN"
+    elseif weatherType == WeatherType.SNOW then
+        return "SNOW"
+    elseif weatherType == WeatherType.HAIL then
+        return "HAIL"
+    elseif weatherType == WeatherType.TWISTER then
+        return "TWISTER"
+    elseif weatherType == WeatherType.THUNDER then
+        return "THUNDER"
+    end
+    return nil
 end
 
 ------------------------------------------------------------------------------
 -- Случайная точка внутри радиуса
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.randomPointInRadius(x, y, z, radius)
+function TaigaAmbientSoundUtil.randomPointInRadius(x, y, z, radius)
 	local angle = math.random() * math.pi * 2
 	local distance = math.random() * radius
 	return {x = x + math.cos(angle) * distance, y = y, z = z + math.sin(angle) * distance}
@@ -250,7 +271,7 @@ end
 ------------------------------------------------------------------------------
 -- Случайная точка на окружности
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.randomPointOnRadius(x, y, z, radius)
+function TaigaAmbientSoundUtil.randomPointOnRadius(x, y, z, radius)
 	local angle = math.random() * math.pi * 2
 	return {x = x + math.cos(angle) * radius, y = y, z = z + math.sin(angle) * radius }
 end
@@ -258,7 +279,7 @@ end
 ------------------------------------------------------------------------------
 -- Движение к цели
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.moveTowards(x, y, z, targetX, targetY, targetZ, speed)
+function TaigaAmbientSoundUtil.moveTowards(x, y, z, targetX, targetY, targetZ, speed)
 	local dx = targetX - x
 	local dy = targetY - y
 	local dz = targetZ - z
@@ -274,7 +295,7 @@ end
 ------------------------------------------------------------------------------
 -- Разбор строки "x y z"
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.parseVector3(value)
+function TaigaAmbientSoundUtil.parseVector3(value)
 	local result = {}
 	for token in string.gmatch(value, "%S+") do
 		table.insert(result, tonumber(token))
@@ -285,7 +306,7 @@ end
 ------------------------------------------------------------------------------
 -- Разделение строки
 ------------------------------------------------------------------------------
-function AmbientSoundUtil.split(str, separator)
+function TaigaAmbientSoundUtil.split(str, separator)
 	local result = {}
 	separator = separator or ","
 	local pattern

@@ -11,15 +11,15 @@
 --   • синхронизацию мультиплеера.
 ------------------------------------------------------------------------------
 
-AmbientSoundSystem = {}
-local AmbientSoundSystem_mt = Class(AmbientSoundSystem)
+TaigaAmbientSoundSystem = {}
+local TaigaAmbientSoundSystem_mt = Class(TaigaAmbientSoundSystem)
 
 ------------------------------------------------------------------------------
 -- Создание объекта
 ------------------------------------------------------------------------------
 
-function AmbientSoundSystem.new(customMt)
-	local self = setmetatable({}, customMt or AmbientSoundSystem_mt)
+function TaigaAmbientSoundSystem.new(customMt)
+	local self = setmetatable({}, customMt or TaigaAmbientSoundSystem_mt)
 
 	-- Конфигурация
 	self.soundFiles = {}
@@ -45,7 +45,7 @@ end
 ------------------------------------------------------------------------------
 -- Инициализация
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:initialize(xmlFilename)
+function TaigaAmbientSoundSystem:initialize(xmlFilename, baseDirectory)
 	if self.initialized then
 		return true
 	end
@@ -54,14 +54,14 @@ function AmbientSoundSystem:initialize(xmlFilename)
 		self.xmlFilename = xmlFilename
 	end
 
-	AmbientSoundUtil.info("----------------------------------------")
-	AmbientSoundUtil.info("Инициализация Ambient Sound System из %s'",tostring(self.xmlFilename))
-	AmbientSoundUtil.info("----------------------------------------")
+	TaigaAmbientSoundUtil.info("----------------------------------------")
+	TaigaAmbientSoundUtil.info("Инициализация Ambient Sound System из %s'",tostring(self.xmlFilename))
+	TaigaAmbientSoundUtil.info("----------------------------------------")
 
 	-- Загрузка XML
-	local soundFiles, configs = AmbientSoundXML.load(self.xmlFilename)
+	local soundFiles, configs = AmbientSoundXML.load(self.xmlFilename, baseDirectory)
 	if soundFiles == nil or configs == nil then
-		AmbientSoundUtil.error("Не удалось загрузить '%s'",tostring(self.xmlFilename))
+		TaigaAmbientSoundUtil.error("Не удалось загрузить '%s'",tostring(self.xmlFilename))
 		return false
 	end
 	self.soundFiles = soundFiles
@@ -72,24 +72,24 @@ function AmbientSoundSystem:initialize(xmlFilename)
 	for _, config in ipairs(self.configs) do
 		self.configsById[config.id] = config
 	end
-	AmbientSoundUtil.info("Загружено файлов: %d", #self.soundFiles)
-	AmbientSoundUtil.info("Загружено конфигураций: %d", #self.configs)
+	TaigaAmbientSoundUtil.info("Загружено файлов: %d", #self.soundFiles)
+	TaigaAmbientSoundUtil.info("Загружено конфигураций: %d", #self.configs)
 
 	-- Создание Scheduler
 	self.scheduler = AmbientSoundScheduler.new(self.configs)
-	AmbientSoundUtil.info("Scheduler создан")
+	TaigaAmbientSoundUtil.info("Scheduler создан")
 	if self.scheduler ~= nil then
 		self.scheduler:reset()
 	end
 	self.initialized = true
-	AmbientSoundUtil.info("Система успешно запущена.")
+	TaigaAmbientSoundUtil.info("Система успешно запущена.")
 	return true
 end
 
 ------------------------------------------------------------------------------
 -- Основное обновление
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:update(dt)
+function TaigaAmbientSoundSystem:update(dt)
 	if not self.enabled then
 		return
 	end
@@ -113,13 +113,13 @@ end
 ------------------------------------------------------------------------------
 -- Создание экземпляра звука
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:createRuntimeSound(config)
+function TaigaAmbientSoundSystem:createRuntimeSound(config)
 	if config == nil then
 		return nil
 	end
 	local position = self:getSpawnPosition(config)
 	if position == nil then
-		AmbientSoundUtil.warning("Не удалось определить позицию появления для ID=%d", config.id)
+		TaigaAmbientSoundUtil.warning("Не удалось определить позицию появления для ID=%d", config.id)
 		return nil
 	end
 
@@ -129,15 +129,15 @@ function AmbientSoundSystem:createRuntimeSound(config)
 	self.nextRuntimeId = self.nextRuntimeId + 1
 	runtimeSound:setPosition(position)
 	if not runtimeSound:load() then
-		AmbientSoundUtil.warning("Ошибка загрузки Runtime #%d",runtimeSound.runtimeId)
+		TaigaAmbientSoundUtil.warning("Ошибка загрузки Runtime #%d",runtimeSound.runtimeId)
 		return nil
 	end
 
 	self.activeSounds[runtimeSound.runtimeId] = runtimeSound
-	AmbientSoundUtil.debug("Создан Runtime #%d (config=%d)", runtimeSound.runtimeId, config.id)
+	TaigaAmbientSoundUtil.debug("Создан Runtime #%d (config=%d)", runtimeSound.runtimeId, config.id)
 
 	if config.type == "global" then
-		if AmbientSoundUtil.isServer() then
+		if TaigaAmbientSoundUtil.isServer() then
 			runtimeSound:play()
 			AmbientSoundPlayEvent.sendEvent(runtimeSound.runtimeId, config.id, position)
 		end
@@ -151,7 +151,7 @@ end
 ------------------------------------------------------------------------------
 -- Обновление активных экземпляров
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:updateRuntimeSounds(dt)
+function TaigaAmbientSoundSystem:updateRuntimeSounds(dt)
 	local removeList = {}
 	for runtimeId, runtimeSound in pairs(self.activeSounds) do
 		local alive = runtimeSound:update(dt)
@@ -159,7 +159,7 @@ function AmbientSoundSystem:updateRuntimeSounds(dt)
 			-- Если звук движется, сервер синхронизирует позицию
 			if runtimeSound:isMoving()
 				and runtimeSound.config.type == "global"
-				and AmbientSoundUtil.isServer() then
+				and TaigaAmbientSoundUtil.isServer() then
 				local position = runtimeSound:getPosition()
 				AmbientSoundMoveEvent.sendEvent(
 					runtimeId,
@@ -185,41 +185,41 @@ end
 ------------------------------------------------------------------------------
 -- Удаление Runtime экземпляра
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:removeRuntimeSound(runtimeId)
+function TaigaAmbientSoundSystem:removeRuntimeSound(runtimeId)
 	local runtimeSound = self.activeSounds[runtimeId]
 	if runtimeSound == nil then
 		return
 	end
 
 	-- Если это глобальный звук, сообщаем клиентам
-	if runtimeSound.config.type == "global" and AmbientSoundUtil.isServer() then
+	if runtimeSound.config.type == "global" and TaigaAmbientSoundUtil.isServer() then
 		AmbientSoundStopEvent.sendEvent(runtimeId)
 	end
 
 	runtimeSound:delete()
 	self.activeSounds[runtimeId] = nil
 	collectgarbage("step")
-	AmbientSoundUtil.debug("Удалён Runtime #%d", runtimeId)
+	TaigaAmbientSoundUtil.debug("Удалён Runtime #%d", runtimeId)
 end
 
 ------------------------------------------------------------------------------
 -- Получение Runtime экземпляра
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRuntimeSound(runtimeId)
+function TaigaAmbientSoundSystem:getRuntimeSound(runtimeId)
 	return self.activeSounds[runtimeId]
 end
 
 ------------------------------------------------------------------------------
 -- Получение конфигурации
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getConfig(configId)
+function TaigaAmbientSoundSystem:getConfig(configId)
 	return self.configsById[configId]
 end
 
 ------------------------------------------------------------------------------
 -- Определение позиции появления
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getSpawnPosition(config)
+function TaigaAmbientSoundSystem:getSpawnPosition(config)
 	if config.mode == "static" then
 		return self:getStaticPosition(config)
 	elseif config.mode == "running" then
@@ -227,21 +227,21 @@ function AmbientSoundSystem:getSpawnPosition(config)
 	elseif config.mode == "fly" then
 		return self:getFlyPosition(config)
 	end
-	AmbientSoundUtil.warning("Неизвестный режим '%s'",tostring(config.mode))
+	TaigaAmbientSoundUtil.warning("Неизвестный режим '%s'",tostring(config.mode))
 	return nil
 end
 
 ------------------------------------------------------------------------------
 -- Статическая позиция
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getStaticPosition(config)
+function TaigaAmbientSoundSystem:getStaticPosition(config)
 	if config.translation == nil then
 		return nil
 	end
 	local position = { x = config.translation.x, y = config.translation.y, z = config.translation.z}
 	if config.randomRadius ~= nil
 		and config.randomRadius > 0 then
-		position = AmbientSoundUtil.randomPointInRadius(position.x, position.y, position.z, config.randomRadius)
+		position = TaigaAmbientSoundUtil.randomPointInRadius(position.x, position.y, position.z, config.randomRadius)
 	end
 	return position
 end
@@ -249,33 +249,33 @@ end
 ------------------------------------------------------------------------------
 -- Позиция бегущего объекта
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRunningPosition(config)
+function TaigaAmbientSoundSystem:getRunningPosition(config)
 	local player = self:getRandomPlayer()
 	if player == nil then
 		return nil
 	end
 
-	local x, y, z = AmbientSoundUtil.getPlayerWorldPosition(player)
+	local x, y, z = TaigaAmbientSoundUtil.getPlayerWorldPosition(player)
 	local distance = config.distancePlayer or 120
-	return AmbientSoundUtil.randomPointOnRadius(x, y, z, distance)
+	return TaigaAmbientSoundUtil.randomPointOnRadius(x, y, z, distance)
 end
 
 ------------------------------------------------------------------------------
 -- Позиция локального летающего объекта
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getFlyPosition(config)
+function TaigaAmbientSoundSystem:getFlyPosition(config)
 	local player = self:getRandomPlayer()
 	if player == nil then
 		return nil
 	end
-	local x, y, z = AmbientSoundUtil.getPlayerWorldPosition(player)
-	return AmbientSoundUtil.randomPointInRadius(x, y + (config.heightOffset or 1.6), z, config.distancePlayer or 1.0)
+	local x, y, z = TaigaAmbientSoundUtil.getPlayerWorldPosition(player)
+	return TaigaAmbientSoundUtil.randomPointInRadius(x, y + (config.heightOffset or 1.6), z, config.distancePlayer or 1.0)
 end
 
 ------------------------------------------------------------------------------
 -- Получение случайного игрока
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRandomPlayer()
+function TaigaAmbientSoundSystem:getRandomPlayer()
 	if g_currentMission == nil then
 		return nil
 	end
@@ -306,7 +306,7 @@ end
 ------------------------------------------------------------------------------
 -- Возвращает количество активных экземпляров
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getRuntimeCount()
+function TaigaAmbientSoundSystem:getRuntimeCount()
 	local count = 0
 	for _, _ in pairs(self.activeSounds) do
 		count = count + 1
@@ -317,7 +317,7 @@ end
 ------------------------------------------------------------------------------
 -- Остановка всех активных звуков
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:stopAll()
+function TaigaAmbientSoundSystem:stopAll()
 	local runtimeIds = {}
 	for runtimeId, _ in pairs(self.activeSounds) do
 		table.insert(runtimeIds, runtimeId)
@@ -331,38 +331,38 @@ end
 ------------------------------------------------------------------------------
 -- Включение / отключение системы
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:setEnabled(state)
+function TaigaAmbientSoundSystem:setEnabled(state)
 	self.enabled = state == true
-	AmbientSoundUtil.info("Ambient Sound System %s", self.enabled and "включена" or "отключена")
+	TaigaAmbientSoundUtil.info("Ambient Sound System %s", self.enabled and "включена" or "отключена")
 end
 
 ------------------------------------------------------------------------------
 -- Проверка активности
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:isEnabled()
+function TaigaAmbientSoundSystem:isEnabled()
 	return self.enabled
 end
 
 ------------------------------------------------------------------------------
 -- Отладочная информация
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:printDebug()
-	AmbientSoundUtil.info("----------------------------------------")
-	AmbientSoundUtil.info("Статистика Ambient Sound System")
-	AmbientSoundUtil.info("----------------------------------------")
-	AmbientSoundUtil.info("Конфигураций: %d", #self.configs)
-	AmbientSoundUtil.info("Активных экземпляров: %d", self:getRuntimeCount())
-	AmbientSoundUtil.info("Следующий Runtime ID: %d", self.nextRuntimeId)
+function TaigaAmbientSoundSystem:printDebug()
+	TaigaAmbientSoundUtil.info("----------------------------------------")
+	TaigaAmbientSoundUtil.info("Статистика Ambient Sound System")
+	TaigaAmbientSoundUtil.info("----------------------------------------")
+	TaigaAmbientSoundUtil.info("Конфигураций: %d", #self.configs)
+	TaigaAmbientSoundUtil.info("Активных экземпляров: %d", self:getRuntimeCount())
+	TaigaAmbientSoundUtil.info("Следующий Runtime ID: %d", self.nextRuntimeId)
 	for runtimeId, runtimeSound in pairs(self.activeSounds) do
-		AmbientSoundUtil.info("Runtime #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
+		TaigaAmbientSoundUtil.info("Runtime #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
 	end
 end
 
 ------------------------------------------------------------------------------
 -- Очистка системы
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:delete()
-	AmbientSoundUtil.info("Остановка Ambient Sound System...")
+function TaigaAmbientSoundSystem:delete()
+	TaigaAmbientSoundUtil.info("Остановка Ambient Sound System...")
 	self:stopAll()
 	if self.scheduler ~= nil then
 		self.scheduler:delete()
@@ -378,7 +378,7 @@ function AmbientSoundSystem:delete()
 		g_ambientSoundSystem = nil
 	end
 
-	AmbientSoundUtil.info("Ambient Sound System остановлена.")
+	TaigaAmbientSoundUtil.info("Ambient Sound System остановлена.")
 	self.enabled = false
 end
 
@@ -386,13 +386,13 @@ end
 -- Проверка существования Runtime
 ------------------------------------------------------------------------------
 
-function AmbientSoundSystem:hasRuntime(runtimeId)
+function TaigaAmbientSoundSystem:hasRuntime(runtimeId)
 	return self.activeSounds[runtimeId] ~= nil
 end
 
 ------------------------------------------------------------------------------
 -- Получение списка активных Runtime
 ------------------------------------------------------------------------------
-function AmbientSoundSystem:getActiveSounds()
+function TaigaAmbientSoundSystem:getActiveSounds()
 	return self.activeSounds
 end

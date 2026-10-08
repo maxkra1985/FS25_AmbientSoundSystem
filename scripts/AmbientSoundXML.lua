@@ -6,19 +6,41 @@
 AmbientSoundXML = {}
 
 ------------------------------------------------------------------------------
+-- Разрешение пути аудиофайла относительно каталога карты.
+-- $mapDir$/sounds/... = <каталог мода>/map/sounds/...
+------------------------------------------------------------------------------
+function AmbientSoundXML.resolveFilename(filename, baseDirectory)
+    if filename == nil or filename == "" then
+        return nil
+    end
+
+    if filename:sub(1, 8) == "$mapDir$" then
+        local relativePath = filename:sub(9):gsub("^[/\\]+", "")
+        filename = "map/" .. relativePath
+    end
+
+    local resolved = Utils.getFilename(filename, baseDirectory)
+    if resolved == nil or not fileExists(resolved) then
+        TaigaAmbientSoundUtil.warning("Аудиофайл не найден: %s", tostring(resolved))
+        return nil
+    end
+    return resolved
+end
+
+------------------------------------------------------------------------------
 -- Загрузка XML
 ------------------------------------------------------------------------------
-function AmbientSoundXML.load(xmlFilename)
+function AmbientSoundXML.load(xmlFilename, baseDirectory)
 	if xmlFilename == nil then
 		return nil, nil
 	end
 	if not fileExists(xmlFilename) then
-		AmbientSoundUtil.error("XML файл не найден: %s", tostring(xmlFilename))
+		TaigaAmbientSoundUtil.error("XML файл не найден: %s", tostring(xmlFilename))
 		return nil, nil
 	end
 	local xmlFile = loadXMLFile("AmbientSoundsXML",xmlFilename)
-	if xmlFile == nil then
-		AmbientSoundUtil.error("Не удалось открыть XML: %s", tostring(xmlFilename))
+	if xmlFile == nil or xmlFile == 0 then
+		TaigaAmbientSoundUtil.error("Не удалось открыть XML: %s", tostring(xmlFilename))
 		return nil, nil
 	end
 
@@ -34,8 +56,8 @@ function AmbientSoundXML.load(xmlFilename)
 		local id = getXMLInt(xmlFile, key .. "#id")
 		local filename = getXMLString(xmlFile, key .. "#filename")
 		if id ~= nil and filename ~= nil then
-			soundFiles[id] = filename
-			AmbientSoundUtil.debug("SoundFile %d -> %s", id, filename)
+			soundFiles[id] = AmbientSoundXML.resolveFilename(filename, baseDirectory)
+			TaigaAmbientSoundUtil.debug("SoundFile %d -> %s", id, tostring(soundFiles[id]))
 		end
 		index = index + 1
 	end
@@ -57,7 +79,7 @@ function AmbientSoundXML.load(xmlFilename)
 	end
 
 	delete(xmlFile)
-	AmbientSoundUtil.info("Загружено %d описаний звуков.", #configs)
+	TaigaAmbientSoundUtil.info("Загружено %d описаний звуков.", #configs)
 	return soundFiles, configs
 end
 
@@ -89,7 +111,7 @@ function AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
 	-- Координаты
 	local translation = getXMLString(xmlFile, key .. "#translation")
 	if translation ~= nil then
-		local x, y, z = AmbientSoundUtil.parseVector3(translation)
+		local x, y, z = TaigaAmbientSoundUtil.parseVector3(translation)
 		config.translation = { x = x, y = y, z = z }
 	end
 
@@ -98,7 +120,7 @@ function AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
 	local fileList = getXMLString(xmlFile, key .. "#soundFiles")
 
 	if fileList ~= nil then
-		for _, value in ipairs(AmbientSoundUtil.split(fileList, ",")) do
+		for _, value in ipairs(TaigaAmbientSoundUtil.split(fileList, ",")) do
 			local id = tonumber(value)
 			if id ~= nil and soundFiles[id] ~= nil then
 				table.insert(config.soundFiles, soundFiles[id])
@@ -110,7 +132,7 @@ function AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
 	config.weather = {}
 	local weather = getXMLString(xmlFile, key .. "#weather")
 	if weather ~= nil then
-		for _, value in ipairs(AmbientSoundUtil.split(weather, " ")) do
+		for _, value in ipairs(TaigaAmbientSoundUtil.split(weather, " ")) do
 			table.insert(config.weather, string.upper(value))
 		end
 	end
@@ -119,14 +141,14 @@ function AmbientSoundXML.loadSound(xmlFile, key, soundFiles)
 	config.seasons = {}
 	local seasons = getXMLString(xmlFile, key .. "#seasons")
 	if seasons ~= nil then
-		for _, value in ipairs(AmbientSoundUtil.split(seasons, " ")) do
+		for _, value in ipairs(TaigaAmbientSoundUtil.split(seasons, " ")) do
 			table.insert(config.seasons, string.upper(value))
 		end
 	end
 
 	-- Проверка конфигурации
 	if #config.soundFiles == 0 then
-		AmbientSoundUtil.warning("У звука отсутствуют soundFiles.")
+		TaigaAmbientSoundUtil.warning("У звука отсутствуют soundFiles.")
 		return nil
 	end
 

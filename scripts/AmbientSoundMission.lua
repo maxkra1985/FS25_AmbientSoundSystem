@@ -25,15 +25,15 @@ function AmbientSoundMission.loadMissionFinished(mission)
 		Logging.info("[AmbientSoundMission] mission.missionInfo.baseDirectory=%s", tostring(mission.missionInfo.baseDirectory))
 	end
 	Logging.info("[AmbientSoundMission] g_currentModDirectory=%s", tostring(g_currentModDirectory))
-	AmbientSoundUtil.info("Инициализация Ambient Sound System...")
-	g_ambientSoundSystem = AmbientSoundSystem.new()
+	TaigaAmbientSoundUtil.info("Инициализация Ambient Sound System...")
+	g_ambientSoundSystem = TaigaAmbientSoundSystem.new()
 	local xmlFilename = Utils.getFilename("scripts/AmbientSoundSystem/ambientSounds.xml",mission.baseDirectory)
 	Logging.info("[AmbientSoundMission] xmlFilename='%s'", xmlFilename)
-	local success = g_ambientSoundSystem:initialize(xmlFilename)
+	local success = g_ambientSoundSystem:initialize(xmlFilename, mission.baseDirectory)
 	if success then
-		AmbientSoundUtil.info("Ambient Sound System успешно запущена.")
+		TaigaAmbientSoundUtil.info("Ambient Sound System успешно запущена.")
 	else
-		AmbientSoundUtil.error("Не удалось инициализировать Ambient Sound System.")
+		TaigaAmbientSoundUtil.error("Не удалось инициализировать Ambient Sound System.")
 		g_ambientSoundSystem = nil
 	end
 end

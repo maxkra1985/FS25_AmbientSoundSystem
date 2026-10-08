@@ -44,7 +44,7 @@ end
 -- Выполнение на клиенте
 ------------------------------------------------------------------------------
 function AmbientSoundStopEvent:run(connection)
-	if AmbientSoundUtil.isServer() then
+	if TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	local system = g_ambientSoundSystem
@@ -53,19 +53,19 @@ function AmbientSoundStopEvent:run(connection)
 	end
 	local runtime = system:getRuntimeSound(self.runtimeId)
 	if runtime == nil then
-		AmbientSoundUtil.warning("StopEvent: Runtime #%d не найден.", self.runtimeId)
+		TaigaAmbientSoundUtil.warning("StopEvent: Runtime #%d не найден.", self.runtimeId)
 		return
 	end
 	runtime:delete()
 	system.activeSounds[self.runtimeId] = nil
-	AmbientSoundUtil.debug("Удалён Runtime #%d", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("Удалён Runtime #%d", self.runtimeId)
 end
 
 ------------------------------------------------------------------------------
 -- Отправка события
 ------------------------------------------------------------------------------
 function AmbientSoundStopEvent.sendEvent(runtimeId)
-	if not AmbientSoundUtil.isServer() then
+	if not TaigaAmbientSoundUtil.isServer() then
 		return
 	end
 	g_server:broadcastEvent(AmbientSoundStopEvent.new(runtimeId), nil, nil)
@@ -85,5 +85,5 @@ end
 -- Отладочная информация
 ------------------------------------------------------------------------------
 function AmbientSoundStopEvent:printDebug()
-	AmbientSoundUtil.debug("StopEvent Runtime=%d", self.runtimeId)
+	TaigaAmbientSoundUtil.debug("StopEvent Runtime=%d", self.runtimeId)
 end

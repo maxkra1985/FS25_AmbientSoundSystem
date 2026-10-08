@@ -61,8 +61,8 @@ function AmbientSoundMoveEvent:run(connection)
 		return
 	end
 	local runtime = system:getRuntimeSound(self.runtimeId)
-	if runtime == nil then
-		TaigaAmbientSoundUtil.warning("MoveEvent: Runtime #%d не найден.", self.runtimeId)
+	if runtime == nil or not runtime.networkControlled then
+		-- Событие может опередить PlayEvent или относиться к уже завершённому звуку.
 		return
 	end
 	runtime:setWorldPosition(self.x, self.y, self.z)

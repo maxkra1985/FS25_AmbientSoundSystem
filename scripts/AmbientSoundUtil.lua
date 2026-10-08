@@ -60,13 +60,23 @@ end
 -- Создание пространственного AudioSource.
 -- Возвращает Sample и узел источника: удалять необходимо только AudioSource.
 ------------------------------------------------------------------------------
-function TaigaAmbientSoundUtil.createSample(config)
+function TaigaAmbientSoundUtil.createSample(config, soundIndex)
     if config == nil or config.soundFiles == nil or #config.soundFiles == 0 then
         return nil, nil
     end
 
-    -- Случайный вариант выбирается из уже разрешённых при загрузке XML путей.
-    local filename = config.soundFiles[math.random(#config.soundFiles)]
+    -- Глобальный звук получает индекс от сервера, локальный выбирает его сам.
+    local selectedIndex = soundIndex
+    if selectedIndex == nil then
+        selectedIndex = math.random(#config.soundFiles)
+    end
+    if type(selectedIndex) ~= "number" or selectedIndex < 1
+        or selectedIndex > #config.soundFiles or selectedIndex % 1 ~= 0 then
+        TaigaAmbientSoundUtil.warning("Неверный индекс звукового файла: %s", tostring(selectedIndex))
+        return nil, nil, nil
+    end
+
+    local filename = config.soundFiles[selectedIndex]
     local soundNode = createAudioSource(
         "TaigaAmbientSound",
         filename,
@@ -91,7 +101,7 @@ function TaigaAmbientSoundUtil.createSample(config)
     if AudioGroup ~= nil and AudioGroup.ENVIRONMENT ~= nil then
         setSampleGroup(sample, AudioGroup.ENVIRONMENT)
     end
-    return sample, soundNode
+    return sample, soundNode, selectedIndex
 end
 
 ------------------------------------------------------------------------------

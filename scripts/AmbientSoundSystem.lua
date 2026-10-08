@@ -27,8 +27,10 @@ function TaigaAmbientSoundSystem.new(customMt)
 	self.configsById = {}
 
 	-- Активные экземпляры
-	self.activeSounds = {}
+	self.activeSounds = {} -- только глобальные, ID выдаёт сервер
+	self.localSounds = {}  -- только локальные звуки этого игрока
 	self.nextRuntimeId = 1
+	self.nextLocalRuntimeId = 1
 
 	-- Scheduler
 	self.scheduler = nil
@@ -76,7 +78,16 @@ function TaigaAmbientSoundSystem:initialize(xmlFilename, baseDirectory)
 	TaigaAmbientSoundUtil.info("Загружено конфигураций: %d", #self.configs)
 
 	-- Создание Scheduler
-	self.scheduler = AmbientSoundScheduler.new(self.configs)
+	-- Сервер планирует global, каждый игровой клиент планирует только свои local.
+	-- На хосте оба типа работают в одной системе, но в разных таблицах.
+	local scheduledConfigs = {}
+	for _, config in ipairs(self.configs) do
+		if config.type == "global" and TaigaAmbientSoundUtil.isServer()
+			or config.type == "local" and g_dedicatedServer == nil then
+			table.insert(scheduledConfigs, config)
+		end
+	end
+	self.scheduler = AmbientSoundScheduler.new(scheduledConfigs)
 	TaigaAmbientSoundUtil.info("Scheduler создан")
 	if self.scheduler ~= nil then
 		self.scheduler:reset()
@@ -111,95 +122,166 @@ function TaigaAmbientSoundSystem:update(dt)
 end
 
 ------------------------------------------------------------------------------
+-- Выдача сетевого ID
+------------------------------------------------------------------------------
+-- Возвращает свободный ID из диапазона UInt16, используемого в событиях.
+function TaigaAmbientSoundSystem:allocateRuntimeId()
+    for _ = 1, 65535 do
+        local runtimeId = self.nextRuntimeId
+        self.nextRuntimeId = runtimeId % 65535 + 1
+        if self.activeSounds[runtimeId] == nil then
+            return runtimeId
+        end
+    end
+    TaigaAmbientSoundUtil.warning("Все идентификаторы глобальных звуков заняты.")
+    return nil
+end
+
+------------------------------------------------------------------------------
 -- Создание экземпляра звука
 ------------------------------------------------------------------------------
+-- Global создаётся только сервером, local — только на машине с локальным игроком.
 function TaigaAmbientSoundSystem:createRuntimeSound(config)
-	if config == nil then
-		return nil
-	end
-	local position = self:getSpawnPosition(config)
-	if position == nil then
-		TaigaAmbientSoundUtil.warning("Не удалось определить позицию появления для ID=%d", config.id)
-		return nil
-	end
+    if config == nil then
+        return nil
+    end
 
-	local runtimeSound = AmbientSound.new()
-	runtimeSound:setConfig(config)
-	runtimeSound.runtimeId = self.nextRuntimeId
-	self.nextRuntimeId = self.nextRuntimeId + 1
-	runtimeSound:setPosition(position)
-	if not runtimeSound:load() then
-		TaigaAmbientSoundUtil.warning("Ошибка загрузки Runtime #%d",runtimeSound.runtimeId)
-		return nil
-	end
+    local isGlobal = config.type == "global"
+    if isGlobal then
+        if not TaigaAmbientSoundUtil.isServer() then
+            return nil
+        end
+    elseif config.type == "local" then
+        if g_dedicatedServer ~= nil then
+            return nil
+        end
+        local playerSystem = g_currentMission ~= nil and g_currentMission.playerSystem or nil
+        if playerSystem == nil or playerSystem:getLocalPlayer() == nil then
+            return nil
+        end
+    else
+        TaigaAmbientSoundUtil.warning("Неизвестный тип звука: %s", tostring(config.type))
+        return nil
+    end
 
-	self.activeSounds[runtimeSound.runtimeId] = runtimeSound
-	TaigaAmbientSoundUtil.debug("Создан Runtime #%d (config=%d)", runtimeSound.runtimeId, config.id)
+    local position = self:getSpawnPosition(config)
+    if position == nil then
+        TaigaAmbientSoundUtil.warning("Не удалось определить позицию для config=%d", config.id)
+        return nil
+    end
 
-	if config.type == "global" then
-		if TaigaAmbientSoundUtil.isServer() then
-			runtimeSound:play()
-			AmbientSoundPlayEvent.sendEvent(runtimeSound.runtimeId, config.id, position)
-		end
-	else
-		runtimeSound:play()
-	end
+    local runtimeId
+    if isGlobal then
+        runtimeId = self:allocateRuntimeId()
+        if runtimeId == nil then
+            return nil
+        end
+    else
+        runtimeId = self.nextLocalRuntimeId
+        self.nextLocalRuntimeId = self.nextLocalRuntimeId + 1
+    end
 
-	return runtimeSound
+    local runtimeSound = AmbientSound.new()
+    runtimeSound:setConfig(config)
+    runtimeSound.runtimeId = runtimeId
+    runtimeSound:setPosition(position)
+
+    if not runtimeSound:load() then
+        runtimeSound:delete()
+        return nil
+    end
+    if not runtimeSound:play() then
+        runtimeSound:delete()
+        return nil
+    end
+
+    if isGlobal then
+        self.activeSounds[runtimeId] = runtimeSound
+        -- Клиенты получают точный индекс варианта, выбранный сервером.
+        AmbientSoundPlayEvent.sendEvent(runtimeId, config.id, runtimeSound.soundIndex, position)
+    else
+        self.localSounds[runtimeId] = runtimeSound
+    end
+    TaigaAmbientSoundUtil.debug("Создан %s Runtime #%d (config=%d)", config.type, runtimeId, config.id)
+    return runtimeSound
 end
 
 ------------------------------------------------------------------------------
 -- Обновление активных экземпляров
 ------------------------------------------------------------------------------
+-- Сервер сообщает об изменении позиции global, а клиент ждёт серверной команды Stop.
 function TaigaAmbientSoundSystem:updateRuntimeSounds(dt)
-	local removeList = {}
-	for runtimeId, runtimeSound in pairs(self.activeSounds) do
-		local alive = runtimeSound:update(dt)
-		if alive then
-			-- Если звук движется, сервер синхронизирует позицию
-			if runtimeSound:isMoving()
-				and runtimeSound.config.type == "global"
-				and TaigaAmbientSoundUtil.isServer() then
-				local position = runtimeSound:getPosition()
-				AmbientSoundMoveEvent.sendEvent(
-					runtimeId,
-					position.x,
-					position.y,
-					position.z
-				)
-			end
+    local isServer = TaigaAmbientSoundUtil.isServer()
+    local removeGlobal = {}
 
-			-- Закончил воспроизведение
-			if runtimeSound:isFinished() then
-				table.insert(removeList, runtimeId)
-			end
-		else
-			table.insert(removeList, runtimeId)
-		end
-	end
-	for _, runtimeId in ipairs(removeList) do
-		self:removeRuntimeSound(runtimeId)
-	end
+    for runtimeId, runtimeSound in pairs(self.activeSounds) do
+        local alive, moved = runtimeSound:update(dt)
+        if isServer then
+            if moved and runtimeSound:isMoving() then
+                local position = runtimeSound:getPosition()
+                AmbientSoundMoveEvent.sendEvent(runtimeId, position.x, position.y, position.z)
+            end
+            if not alive or runtimeSound:isFinished() then
+                table.insert(removeGlobal, runtimeId)
+            end
+        end
+        -- Клиент не уничтожает глобальный Runtime самостоятельно.
+        -- Даже если воспроизведение завершилось, ожидаем серверный StopEvent.
+    end
+
+    for _, runtimeId in ipairs(removeGlobal) do
+        self:removeRuntimeSound(runtimeId)
+    end
+
+    local removeLocal = {}
+    for runtimeId, runtimeSound in pairs(self.localSounds) do
+        local alive = runtimeSound:update(dt)
+        if not alive or runtimeSound:isFinished() then
+            table.insert(removeLocal, runtimeId)
+        end
+    end
+    for _, runtimeId in ipairs(removeLocal) do
+        self:removeRuntimeSound(runtimeId, true)
+    end
 end
 
 ------------------------------------------------------------------------------
 -- Удаление Runtime экземпляра
 ------------------------------------------------------------------------------
-function TaigaAmbientSoundSystem:removeRuntimeSound(runtimeId)
-	local runtimeSound = self.activeSounds[runtimeId]
-	if runtimeSound == nil then
-		return
-	end
+-- Удаляет звук из соответствующего пространства ID и синхронизирует Stop для global.
+function TaigaAmbientSoundSystem:removeRuntimeSound(runtimeId, isLocal)
+    local sounds = isLocal and self.localSounds or self.activeSounds
+    local runtimeSound = sounds[runtimeId]
+    if runtimeSound == nil then
+        return
+    end
 
-	-- Если это глобальный звук, сообщаем клиентам
-	if runtimeSound.config.type == "global" and TaigaAmbientSoundUtil.isServer() then
-		AmbientSoundStopEvent.sendEvent(runtimeId)
-	end
+    if not isLocal and TaigaAmbientSoundUtil.isServer() then
+        AmbientSoundStopEvent.sendEvent(runtimeId)
+    end
 
-	runtimeSound:delete()
-	self.activeSounds[runtimeId] = nil
-	collectgarbage("step")
-	TaigaAmbientSoundUtil.debug("Удалён Runtime #%d", runtimeId)
+    runtimeSound:delete()
+    sounds[runtimeId] = nil
+    collectgarbage("step")
+    TaigaAmbientSoundUtil.debug("Удалён %s Runtime #%d", isLocal and "local" or "global", runtimeId)
+end
+
+------------------------------------------------------------------------------
+-- Начальное состояние нового клиента
+------------------------------------------------------------------------------
+-- Посылает вновь подключившемуся клиенту активные global с их точными вариантами.
+function TaigaAmbientSoundSystem:sendActiveGlobalSounds(connection)
+    if not self.initialized or not TaigaAmbientSoundUtil.isServer() or connection == nil then
+        return
+    end
+
+    for runtimeId, runtimeSound in pairs(self.activeSounds) do
+        if runtimeSound.playing and runtimeSound.soundIndex ~= nil then
+            connection:sendEvent(AmbientSoundPlayEvent.new(
+                runtimeId, runtimeSound.config.id, runtimeSound.soundIndex, runtimeSound:getPosition()
+            ))
+        end
+    end
 end
 
 ------------------------------------------------------------------------------
@@ -263,13 +345,22 @@ end
 ------------------------------------------------------------------------------
 -- Позиция локального летающего объекта
 ------------------------------------------------------------------------------
+-- Муха и комар всегда появляются у местного игрока, а не у случайного участника.
 function TaigaAmbientSoundSystem:getFlyPosition(config)
-	local player = self:getRandomPlayer()
-	if player == nil then
-		return nil
-	end
-	local x, y, z = TaigaAmbientSoundUtil.getPlayerWorldPosition(player)
-	return TaigaAmbientSoundUtil.randomPointInRadius(x, y + (config.heightOffset or 1.6), z, config.distancePlayer or 1.0)
+    local playerSystem = g_currentMission ~= nil and g_currentMission.playerSystem or nil
+    if playerSystem == nil then
+        return nil
+    end
+
+    local player = playerSystem:getLocalPlayer()
+    if player == nil or player.rootNode == nil then
+        return nil
+    end
+
+    local x, y, z = TaigaAmbientSoundUtil.getPlayerWorldPosition(player)
+    return TaigaAmbientSoundUtil.randomPointInRadius(
+        x, y + (config.heightOffset or 1.6), z, config.distancePlayer or 1.0
+    )
 end
 
 ------------------------------------------------------------------------------
@@ -306,26 +397,38 @@ end
 ------------------------------------------------------------------------------
 -- Возвращает количество активных экземпляров
 ------------------------------------------------------------------------------
+-- Считает global и local в обоих независимых пространствах идентификаторов.
 function TaigaAmbientSoundSystem:getRuntimeCount()
-	local count = 0
-	for _, _ in pairs(self.activeSounds) do
-		count = count + 1
-	end
-	return count
+    local count = 0
+    for _ in pairs(self.activeSounds) do
+        count = count + 1
+    end
+    for _ in pairs(self.localSounds) do
+        count = count + 1
+    end
+    return count
 end
 
 ------------------------------------------------------------------------------
 -- Остановка всех активных звуков
 ------------------------------------------------------------------------------
+-- При завершении миссии очищает обе таблицы и отправляет Stop для global на сервере.
 function TaigaAmbientSoundSystem:stopAll()
-	local runtimeIds = {}
-	for runtimeId, _ in pairs(self.activeSounds) do
-		table.insert(runtimeIds, runtimeId)
-	end
-	table.sort(runtimeIds)
-	for _, runtimeId in ipairs(runtimeIds) do
-		self:removeRuntimeSound(runtimeId)
-	end
+    local globalIds = {}
+    for runtimeId in pairs(self.activeSounds) do
+        table.insert(globalIds, runtimeId)
+    end
+    for _, runtimeId in ipairs(globalIds) do
+        self:removeRuntimeSound(runtimeId)
+    end
+
+    local localIds = {}
+    for runtimeId in pairs(self.localSounds) do
+        table.insert(localIds, runtimeId)
+    end
+    for _, runtimeId in ipairs(localIds) do
+        self:removeRuntimeSound(runtimeId, true)
+    end
 end
 
 ------------------------------------------------------------------------------
@@ -354,7 +457,10 @@ function TaigaAmbientSoundSystem:printDebug()
 	TaigaAmbientSoundUtil.info("Активных экземпляров: %d", self:getRuntimeCount())
 	TaigaAmbientSoundUtil.info("Следующий Runtime ID: %d", self.nextRuntimeId)
 	for runtimeId, runtimeSound in pairs(self.activeSounds) do
-		TaigaAmbientSoundUtil.info("Runtime #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
+		TaigaAmbientSoundUtil.info("Global #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
+	end
+	for runtimeId, runtimeSound in pairs(self.localSounds) do
+		TaigaAmbientSoundUtil.info("Local #%d (%s)", runtimeId, tostring(runtimeSound.config.name or runtimeSound.config.id))
 	end
 end
 
@@ -369,6 +475,8 @@ function TaigaAmbientSoundSystem:delete()
 		self.scheduler = nil
 	end
 	self.nextRuntimeId = 1
+	self.nextLocalRuntimeId = 1
+	self.localSounds = {}
 	self.configs = {}
 	self.configsById = {}
 	self.soundFiles = {}

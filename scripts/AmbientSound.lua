@@ -28,6 +28,11 @@ function AmbientSound.new(customMt)
 	-- Runtime
 	self.runtimeId = 0
 
+	-- Индекс выбранного файла. Для global определяется сервером.
+	self.soundIndex = nil
+	-- Сетевые global на клиенте не рассчитывают движение самостоятельно.
+	self.networkControlled = false
+
 	-- Sample
 	self.sample = nil
 	self.sampleNode = nil
@@ -80,12 +85,13 @@ end
 ------------------------------------------------------------------------------
 -- Загрузка 3D-звука: Sample принадлежит AudioSource и движется вместе с ним.
 ------------------------------------------------------------------------------
-function AmbientSound:load()
+function AmbientSound:load(soundIndex)
     if self.loaded then
         return true
     end
 
-    self.sample, self.sampleNode = TaigaAmbientSoundUtil.createSample(self.config)
+    -- Для глобального звука клиент загружает только назначенный сервером файл.
+    self.sample, self.sampleNode, self.soundIndex = TaigaAmbientSoundUtil.createSample(self.config, soundIndex)
     if self.sample == nil or self.sampleNode == nil then
         TaigaAmbientSoundUtil.warning("Не удалось создать пространственный звук Runtime #%d", self.runtimeId)
         return false
@@ -95,7 +101,7 @@ function AmbientSound:load()
     setWorldTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
 
     self.loaded = true
-    TaigaAmbientSoundUtil.debug("Runtime #%d загружен.", self.runtimeId)
+    TaigaAmbientSoundUtil.debug("Runtime #%d загружен (вариант %d).", self.runtimeId, self.soundIndex)
     return true
 end
 
@@ -140,49 +146,57 @@ end
 ------------------------------------------------------------------------------
 -- Обновление
 ------------------------------------------------------------------------------
-
+-- Обновляет воспроизведение и возвращает состояние, а также факт перемещения.
 function AmbientSound:update(dt)
-	if not self.loaded then
-		return false
-	end
+    if not self.loaded then
+        return false, false
+    end
 
-	if self.playing then
-		-- Проверяем окончание воспроизведения
-		if not isSamplePlaying(self.sample) then
-			self.finished = true
-			self.playing = false
-			return false
-		end
-	end
+    if self.playing and not isSamplePlaying(self.sample) then
+        self.finished = true
+        self.playing = false
+        return false, false
+    end
 
-	-- Движение источника
-	if self.moveInterval > 0 then
-		self:updateMovement(dt)
-	end
-	return true
+    -- Клиентские копии global движутся только через MoveEvent от сервера.
+    local moved = false
+    if self.playing and not self.networkControlled and self.moveInterval > 0 then
+        moved = self:updateMovement(dt)
+    end
+    return true, moved
 end
 
 ------------------------------------------------------------------------------
 -- Обновление движения
 ------------------------------------------------------------------------------
+-- Сдвигает источник с заданным интервалом и возвращает true только при изменении координат.
 function AmbientSound:updateMovement(dt)
-	self.moveTimer = self.moveTimer + dt
-	if self.moveTimer < self.moveInterval * 1000 then
-		return
-	end
-	self.moveTimer = 0
+    local intervalMs = self.moveInterval * 1000
+    if intervalMs <= 0 then
+        return false
+    end
 
-	-- Получаем новую цель движения
-	self.targetPosition = TaigaAmbientSoundUtil.randomPointInRadius(self.position.x, self.position.y, self.position.z, self.config.distancePlayer or 1.5)
+    self.moveTimer = self.moveTimer + dt
+    if self.moveTimer < intervalMs then
+        return false
+    end
+    self.moveTimer = self.moveTimer % intervalMs
 
-	-- Перемещаемся
-	local x, y, z = TaigaAmbientSoundUtil.moveTowards(self.position.x, self.position.y, self.position.z, self.targetPosition.x, self.targetPosition.y, self.targetPosition.z, self.moveSpeed)
+    -- Сохраняем существующую случайную траекторию, но не отправляем неизменную позицию.
+    self.targetPosition = TaigaAmbientSoundUtil.randomPointInRadius(
+        self.position.x, self.position.y, self.position.z, self.config.distancePlayer or 1.5
+    )
+    local x, y, z = TaigaAmbientSoundUtil.moveTowards(
+        self.position.x, self.position.y, self.position.z,
+        self.targetPosition.x, self.targetPosition.y, self.targetPosition.z,
+        self.moveSpeed
+    )
+    if x == self.position.x and y == self.position.y and z == self.position.z then
+        return false
+    end
 
-	self.position.x = x
-	self.position.y = y
-	self.position.z = z
-
-	setTranslation(self.sampleNode, x, y, z)
+    self:setWorldPosition(x, y, z)
+    return true
 end
 
 ------------------------------------------------------------------------------
@@ -207,7 +221,7 @@ function AmbientSound:setWorldPosition(x, y, z)
 	self.position.y = y
 	self.position.z = z
 	if self.sampleNode ~= nil then
-		setTranslation(self.sampleNode, x, y, z)
+		setWorldTranslation(self.sampleNode, x, y, z)
 	end
 end
 

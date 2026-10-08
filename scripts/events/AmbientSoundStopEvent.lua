@@ -53,11 +53,10 @@ function AmbientSoundStopEvent:run(connection)
 	end
 	local runtime = system:getRuntimeSound(self.runtimeId)
 	if runtime == nil then
-		TaigaAmbientSoundUtil.warning("StopEvent: Runtime #%d не найден.", self.runtimeId)
 		return
 	end
-	runtime:delete()
-	system.activeSounds[self.runtimeId] = nil
+	-- На клиенте событие удаляет только global, local имеет отдельные ID.
+	system:removeRuntimeSound(self.runtimeId)
 	TaigaAmbientSoundUtil.debug("Удалён Runtime #%d", self.runtimeId)
 end
 

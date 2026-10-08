@@ -63,8 +63,19 @@ function AmbientSoundMission.delete(mission)
 end
 
 ------------------------------------------------------------------------------
+-- Синхронизация при подключении клиента
+------------------------------------------------------------------------------
+-- GIANTS вызывает sendInitialClientState после готовности соединения к событиям.
+function AmbientSoundMission.sendInitialClientState(mission, connection, user, farm)
+    if g_ambientSoundSystem ~= nil and mission:getIsServer() then
+        g_ambientSoundSystem:sendActiveGlobalSounds(connection)
+    end
+end
+
+------------------------------------------------------------------------------
 -- Регистрация в Mission00
 ------------------------------------------------------------------------------
 Mission00.loadMission00Finished = Utils.appendedFunction(Mission00.loadMission00Finished, AmbientSoundMission.loadMissionFinished)
 Mission00.update = Utils.appendedFunction(Mission00.update, AmbientSoundMission.update)
 Mission00.delete = Utils.appendedFunction(Mission00.delete, AmbientSoundMission.delete)
+Mission00.sendInitialClientState = Utils.appendedFunction(Mission00.sendInitialClientState or FSBaseMission.sendInitialClientState, AmbientSoundMission.sendInitialClientState)

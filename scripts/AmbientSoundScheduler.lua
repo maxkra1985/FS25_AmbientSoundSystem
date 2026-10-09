@@ -13,9 +13,11 @@ local AmbientSoundScheduler_mt = Class(AmbientSoundScheduler)
 function AmbientSoundScheduler.new(configs, customMt)
 	local self = setmetatable({}, customMt or AmbientSoundScheduler_mt)
 	self.configs = configs or {}
-	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.new] self.configs: %s", tostring(self.configs))
+	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.new] Конфигураций: %d", #self.configs)
 	self.timers = {}
 	self.readyConfigs = {}
+	-- Запросы принудительного запуска обрабатываются в следующем update().
+	self.forcedConfigs = {}
 	return self
 end
 
@@ -25,10 +27,11 @@ end
 function AmbientSoundScheduler:reset()
 	self.timers = {}
 	self.readyConfigs = {}
+	self.forcedConfigs = {}
 	for _, config in ipairs(self.configs) do
 		self.timers[config.id] = math.random(config.minDelay, config.maxDelay)
 	end
-	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.reset] self.timers: %s", tostring(self.timers))
+	TaigaAmbientSoundUtil.debug("[AmbientSoundScheduler.reset] Таймеров установлено: %d", #self.configs)
 end
 
 ------------------------------------------------------------------------------
@@ -42,19 +45,23 @@ function AmbientSoundScheduler:update(dt)
 		if timer ~= nil then
 			timer = timer - delta
 			self.timers[config.id] = timer
-			if timer <= 0 then
+			-- Принудительный запуск выполняется однократно и не зависит от условий.
+			if self.forcedConfigs[config.id] then
+				self.forcedConfigs[config.id] = nil
+				table.insert(self.readyConfigs, config)
+				self.timers[config.id] = math.random(config.minDelay, config.maxDelay)
+				TaigaAmbientSoundUtil.debug("[Scheduler] Принудительный запуск config=%d", config.id)
+			elseif timer <= 0 then
 				if TaigaAmbientSoundUtil.checkConditions(config) then
 					table.insert(self.readyConfigs, config)
 					self.timers[config.id] = math.random(config.minDelay, config.maxDelay)
+					TaigaAmbientSoundUtil.debug("[Scheduler] Готов к запуску config=%d", config.id)
 				else
 					self.timers[config.id] = 60
 				end
 			end
 		end
 	end
-	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.update] self.configs: %s", tostring(self.configs))
-	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.update] self.readyConfigs: %s", tostring(self.readyConfigs))
-	TaigaAmbientSoundUtil.info("[AmbientSoundScheduler.update] self.timers: %s", tostring(self.timers))
 	return self.readyConfigs
 end
 
@@ -90,8 +97,8 @@ function AmbientSoundScheduler:forceTrigger(configId)
 	if config == nil then
 		return false
 	end
-	table.insert(self.readyConfigs, config)
-	self:restartTimer(configId)
+	-- update() очищает readyConfigs перед обработкой, поэтому запрос хранится отдельно.
+	self.forcedConfigs[configId] = true
 	return true
 end
 
@@ -115,5 +122,6 @@ end
 function AmbientSoundScheduler:delete()
 	self.timers = {}
 	self.readyConfigs = {}
+	self.forcedConfigs = {}
 	self.configs = {}
 end

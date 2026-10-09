@@ -31,6 +31,9 @@ function TaigaAmbientSoundSystem.new(customMt)
 	self.localSounds = {}  -- только локальные звуки этого игрока
 	self.nextRuntimeId = 1
 	self.nextLocalRuntimeId = 1
+	-- Буферы списков удаления переиспользуются между кадрами.
+	self.removeGlobalIds = {}
+	self.removeLocalIds = {}
 
 	-- Scheduler
 	self.scheduler = nil
@@ -212,7 +215,7 @@ end
 -- Сервер сообщает об изменении позиции global, а клиент ждёт серверной команды Stop.
 function TaigaAmbientSoundSystem:updateRuntimeSounds(dt)
     local isServer = TaigaAmbientSoundUtil.isServer()
-    local removeGlobal = {}
+    local removeGlobal = self.removeGlobalIds
 
     for runtimeId, runtimeSound in pairs(self.activeSounds) do
         local alive, moved = runtimeSound:update(dt)
@@ -229,19 +232,21 @@ function TaigaAmbientSoundSystem:updateRuntimeSounds(dt)
         -- Даже если воспроизведение завершилось, ожидаем серверный StopEvent.
     end
 
-    for _, runtimeId in ipairs(removeGlobal) do
-        self:removeRuntimeSound(runtimeId)
+    for i = #removeGlobal, 1, -1 do
+        self:removeRuntimeSound(removeGlobal[i])
+        removeGlobal[i] = nil
     end
 
-    local removeLocal = {}
+    local removeLocal = self.removeLocalIds
     for runtimeId, runtimeSound in pairs(self.localSounds) do
         local alive = runtimeSound:update(dt)
         if not alive or runtimeSound:isFinished() then
             table.insert(removeLocal, runtimeId)
         end
     end
-    for _, runtimeId in ipairs(removeLocal) do
-        self:removeRuntimeSound(runtimeId, true)
+    for i = #removeLocal, 1, -1 do
+        self:removeRuntimeSound(removeLocal[i], true)
+        removeLocal[i] = nil
     end
 end
 
@@ -262,7 +267,6 @@ function TaigaAmbientSoundSystem:removeRuntimeSound(runtimeId, isLocal)
 
     runtimeSound:delete()
     sounds[runtimeId] = nil
-    collectgarbage("step")
     TaigaAmbientSoundUtil.debug("Удалён %s Runtime #%d", isLocal and "local" or "global", runtimeId)
 end
 
@@ -434,9 +438,17 @@ end
 ------------------------------------------------------------------------------
 -- Включение / отключение системы
 ------------------------------------------------------------------------------
+-- Отключение системы останавливает уже запущенные звуки и освобождает их ресурсы.
 function TaigaAmbientSoundSystem:setEnabled(state)
-	self.enabled = state == true
-	TaigaAmbientSoundUtil.info("Ambient Sound System %s", self.enabled and "включена" or "отключена")
+	local enabled = state == true
+	if self.enabled == enabled then
+		return
+	end
+	if not enabled then
+		self:stopAll()
+	end
+	self.enabled = enabled
+	TaigaAmbientSoundUtil.info("Ambient Sound System %s", enabled and "включена" or "отключена")
 end
 
 ------------------------------------------------------------------------------
@@ -477,6 +489,8 @@ function TaigaAmbientSoundSystem:delete()
 	self.nextRuntimeId = 1
 	self.nextLocalRuntimeId = 1
 	self.localSounds = {}
+	self.removeGlobalIds = {}
+	self.removeLocalIds = {}
 	self.configs = {}
 	self.configsById = {}
 	self.soundFiles = {}

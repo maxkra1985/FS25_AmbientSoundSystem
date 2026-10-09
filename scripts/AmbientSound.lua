@@ -119,7 +119,8 @@ function AmbientSound:play()
 		return false
 	end
 
-	setTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
+	-- Узел AudioSource установлен в мировых координатах при загрузке.
+	setWorldTranslation(self.sampleNode, self.position.x, self.position.y, self.position.z)
 	playSample(self.sample, 1, 1, 0)
 	self.playing = true
 	self.finished = false
